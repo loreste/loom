@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/loreste/loom/core"
 )
@@ -322,33 +323,63 @@ type NetworkGuard struct {
 	HostFields []string
 	// AllowPrivate when true weakens the guard (default false).
 	AllowPrivate bool
+	// SkipDNS when true only checks literal IPs/hostnames (no resolution).
+	// Default false: hostnames are resolved and any private/link-local answer is denied.
+	SkipDNS bool
+	// Resolver optional; nil uses net.DefaultResolver.
+	Resolver interface {
+		LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error)
+	}
 }
 
 func (g NetworkGuard) Name() string { return "network" }
 
-func (g NetworkGuard) Check(_ context.Context, _ core.Identity, _ *core.Operation, req *core.Request) Result {
+func (g NetworkGuard) Check(ctx context.Context, _ core.Identity, _ *core.Operation, req *core.Request) Result {
 	fields := g.HostFields
 	if len(fields) == 0 {
 		fields = []string{"host", "url", "endpoint", "target"}
 	}
-	for _, f := range fields {
-		raw, ok := req.Input[f]
-		if !ok {
-			continue
-		}
-		s, ok := raw.(string)
-		if !ok {
-			return Result{Name: "network", OK: false, Message: f + " must be string"}
-		}
+	// Also scan one level of nested maps for the same field names (webhook configs).
+	candidates := collectHostCandidates(req.Input, fields)
+	for _, s := range candidates {
 		host := extractHost(s)
 		if host == "" {
 			return Result{Name: "network", OK: false, Message: "empty host"}
 		}
-		if !g.AllowPrivate && isBlockedHost(host) {
+		if !g.AllowPrivate && g.isBlockedHost(ctx, host) {
 			return Result{Name: "network", OK: false, Message: "host blocked by network guardrail: " + host}
 		}
 	}
 	return Result{Name: "network", OK: true, Message: "network ok"}
+}
+
+func collectHostCandidates(input map[string]any, fields []string) []string {
+	if input == nil {
+		return nil
+	}
+	want := make(map[string]struct{}, len(fields))
+	for _, f := range fields {
+		want[strings.ToLower(f)] = struct{}{}
+	}
+	var out []string
+	var walk func(map[string]any, int)
+	walk = func(m map[string]any, depth int) {
+		if m == nil || depth > 3 {
+			return
+		}
+		for k, v := range m {
+			if _, ok := want[strings.ToLower(k)]; ok {
+				if s, ok := v.(string); ok {
+					out = append(out, s)
+				}
+			}
+			if nested, ok := v.(map[string]any); ok {
+				walk(nested, depth+1)
+			}
+		}
+	}
+	walk(input, 0)
+	return out
 }
 
 func extractHost(s string) string {
@@ -373,20 +404,57 @@ func extractHost(s string) string {
 	return host
 }
 
-func isBlockedHost(host string) bool {
+func (g NetworkGuard) isBlockedHost(ctx context.Context, host string) bool {
 	h := strings.ToLower(strings.Trim(host, "[]"))
-	if h == "" || h == "localhost" || h == "metadata.google.internal" || strings.HasSuffix(h, ".local") {
+	if h == "" || h == "localhost" || h == "metadata.google.internal" ||
+		h == "metadata" || strings.HasSuffix(h, ".local") ||
+		strings.HasSuffix(h, ".internal") {
 		return true
 	}
 	ip, ok := parseHostIP(h)
-	if !ok {
-		// DNS not resolved here — block obvious cloud metadata names only.
+	if ok {
+		return isBlockedIP(ip)
+	}
+	if g.SkipDNS {
 		return false
 	}
+	// Resolve hostnames and deny if any answer is non-public (SSRF rebinding).
+	// DNS errors fail closed (deny).
+	r := g.Resolver
+	if r == nil {
+		r = net.DefaultResolver
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	lookupCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	addrs, err := r.LookupIPAddr(lookupCtx, h)
+	if err != nil || len(addrs) == 0 {
+		return true // fail closed
+	}
+	for _, a := range addrs {
+		addr, ok := netip.AddrFromSlice(a.IP)
+		if !ok {
+			return true
+		}
+		if isBlockedIP(addr) {
+			return true
+		}
+	}
+	return false
+}
+
+func isBlockedIP(ip netip.Addr) bool {
 	ip = ip.Unmap()
-	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+	if !ip.IsValid() {
 		return true
 	}
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast() {
+		return true
+	}
+	// Cloud metadata range 169.254.0.0/16 is link-local (covered). CGNAT 100.64/10 optional.
 	return false
 }
 

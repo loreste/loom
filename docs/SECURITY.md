@@ -28,17 +28,29 @@ Last review: 2026-08-05. Scope: full pipeline + all adapters + bootstrap default
 9. **GraphQL recon (MEDIUM)** — introspection disabled by default; body limit follows HTTP `MaxBodyBytes`.
 10. **Hostile header coverage** — shared `applyHostileHeaders` on execute + aliases.
 11. **Production serve hardening** — `LOOM_ENV=production|staging` requires `LOOM_DISABLE_DEMO_PRINCIPALS`, `LOOM_JWT_SECRET`, and `LOOM_REQUIRE_DURABLE`. Demo tokens log a loud WARNING.
+12. **CLI god-paths** — `mint-jwt`, `approve`, `--issue-approval` require `LOOM_DEV_TOOLS=1`.
+13. **NetworkGuard DNS** — hostnames are resolved; any private/link-local/metadata answer is denied; DNS errors fail closed. Nested `url`/`host` fields scanned.
+14. **gRPC on serve** — `--grpc-addr=:9090` (or `LOOM_GRPC_ADDR`) starts `loom.v1.Runtime/Execute` with 1 MiB message caps.
 
 ## Residual risk (accepted / deferred)
 
 | Item | Severity | Notes |
 |------|----------|--------|
 | Demo principals in default **development** serve | MED | Intentional for demos; production profile blocks them |
-| CLI `approve` / `mint-jwt` outside pipeline | MED | Operator process access; not remote surface |
-| Nested field ACL / NetworkGuard DNS rebinding | MED | Documented; expand later |
+| CLI `approve` / `mint-jwt` | LOW | Gated by `LOOM_DEV_TOOLS=1` |
+| Nested field ACL depth | MED | Field grants still top-level `*`; secrets redacted recursively |
 | No edge rate limit before auth | LOW | Rely on reverse proxy |
 | DB multi-tenant row isolation | HIGH if shared pool | Use per-tenant pools/RLS — Loom policy is not RLS |
 | Complete failure leaves key in-flight until TTL | LOW | Preferable to double side-effect |
+| NetworkGuard DNS | mitigated | Resolves hostnames; any private/link-local answer denied; DNS errors fail closed |
+
+## Serve surfaces
+
+```bash
+loom serve --addr=:8080 --grpc-addr=:9090
+# HTTP:  /v1/execute, /mcp, /graphql, /.well-known/loom.json, /v1/openapi.json
+# gRPC:  loom.v1.Runtime/Execute  (MaxRecvMsgSize 1MiB)
+```
 
 ## Production checklist
 

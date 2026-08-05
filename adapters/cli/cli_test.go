@@ -67,3 +67,31 @@ func TestCLIAllowWithGrantedPrincipal(t *testing.T) {
 		t.Fatalf("granted principal must allow: %+v", resp.Denial)
 	}
 }
+
+func TestCLIDevToolsGated(t *testing.T) {
+	t.Setenv("LOOM_DEV_TOOLS", "")
+	p, err := bootstrap.NewPlatform(bootstrap.Config{PolicySyncInterval: -1, DisableSeedPolicyPublish: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = p.Close() })
+	ad := cli.NewWithPlatform(p)
+	var out, errBuf bytes.Buffer
+	ad.Out, ad.Err = &out, &errBuf
+
+	code := ad.Run(context.Background(), []string{"approve", "--token=x", "--principal=user:bob", "--op=payment.capture", "--boundary=dev"})
+	if code == 0 {
+		t.Fatal("approve without LOOM_DEV_TOOLS must fail")
+	}
+	if !bytes.Contains(errBuf.Bytes(), []byte("LOOM_DEV_TOOLS")) {
+		t.Fatalf("expected LOOM_DEV_TOOLS message, got %s", errBuf.String())
+	}
+
+	t.Setenv("LOOM_DEV_TOOLS", "1")
+	errBuf.Reset()
+	out.Reset()
+	code = ad.Run(context.Background(), []string{"approve", "--token=dev-appr-1", "--principal=user:bob", "--op=payment.capture", "--boundary=dev"})
+	if code != 0 {
+		t.Fatalf("approve with LOOM_DEV_TOOLS must work: %s", errBuf.String())
+	}
+}

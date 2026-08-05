@@ -123,10 +123,16 @@ Writes (`db.exec`) are **high risk** → approval + idempotency by default.
 When you need a network edge, the **same** runtime serves:
 
 ```bash
-go run ./cmd/loom serve --addr=:8080 --database-url=... --redis-url=...
+go run ./cmd/loom serve --addr=:8080 --grpc-addr=:9090 --database-url=... --redis-url=...
 ```
 
-Remote SDKs (Go/Python/TS/Rust) only call `/v1/execute` — they cannot grant power locally.
+HTTP: `/v1/execute`, `/mcp`, `/graphql`, discovery.  
+gRPC: `loom.v1.Runtime/Execute` (optional `--grpc-addr` / `LOOM_GRPC_ADDR`).
+
+Remote SDKs only call the governed edge — they cannot grant power locally.
+
+Production: set `LOOM_ENV=production`, `LOOM_DISABLE_DEMO_PRINCIPALS=true`,
+`LOOM_REQUIRE_DURABLE=true`, and a real `LOOM_JWT_SECRET`. See [`docs/SECURITY.md`](docs/SECURITY.md).
 
 ## Security posture
 

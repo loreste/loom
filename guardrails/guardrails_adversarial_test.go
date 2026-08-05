@@ -2,6 +2,7 @@ package guardrails_test
 
 import (
 	"context"
+	"net"
 	"strings"
 	"testing"
 
@@ -14,7 +15,7 @@ func netReq(v string) *core.Request {
 }
 
 func TestNetworkGuardSSRFUserinfoBypass(t *testing.T) {
-	g := guardrails.NetworkGuard{}
+	g := guardrails.NetworkGuard{SkipDNS: true}
 	attempts := []string{
 		"http://user@169.254.169.254/latest/meta-data",
 		"http://evil.com@169.254.169.254/",
@@ -30,7 +31,7 @@ func TestNetworkGuardSSRFUserinfoBypass(t *testing.T) {
 }
 
 func TestNetworkGuardNonDottedIPBypass(t *testing.T) {
-	g := guardrails.NetworkGuard{}
+	g := guardrails.NetworkGuard{SkipDNS: true}
 	attempts := []string{
 		"http://2130706433/",         // 127.0.0.1 as decimal
 		"http://0177.0.0.1/",         // octal quad
@@ -50,7 +51,7 @@ func TestNetworkGuardNonDottedIPBypass(t *testing.T) {
 }
 
 func TestNetworkGuardMalformedURLFailsClosed(t *testing.T) {
-	g := guardrails.NetworkGuard{}
+	g := guardrails.NetworkGuard{SkipDNS: true}
 	res := g.Check(context.Background(), core.Identity{}, &core.Operation{}, netReq("http://"))
 	if res.OK {
 		t.Fatal("URL claiming a scheme but no host must fail closed")
@@ -58,10 +59,56 @@ func TestNetworkGuardMalformedURLFailsClosed(t *testing.T) {
 }
 
 func TestNetworkGuardPublicStillAllowed(t *testing.T) {
-	g := guardrails.NetworkGuard{}
+	// SkipDNS: public hostname form is allowed when not resolving.
+	g := guardrails.NetworkGuard{SkipDNS: true}
 	res := g.Check(context.Background(), core.Identity{}, &core.Operation{}, netReq("https://example.com/path?q=1"))
 	if !res.OK {
 		t.Fatalf("public host denied: %s", res.Message)
+	}
+}
+
+type fakeResolver struct {
+	addrs map[string][]net.IPAddr
+	err   error
+}
+
+func (f fakeResolver) LookupIPAddr(_ context.Context, host string) ([]net.IPAddr, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.addrs[host], nil
+}
+
+func TestNetworkGuardDNSRebindingBlocked(t *testing.T) {
+	g := guardrails.NetworkGuard{
+		Resolver: fakeResolver{addrs: map[string][]net.IPAddr{
+			"evil.example": {{IP: net.ParseIP("169.254.169.254")}},
+		}},
+	}
+	res := g.Check(context.Background(), core.Identity{}, &core.Operation{}, netReq("https://evil.example/meta"))
+	if res.OK {
+		t.Fatal("DNS rebinding to metadata IP must be blocked")
+	}
+}
+
+func TestNetworkGuardDNSErrorFailsClosed(t *testing.T) {
+	g := guardrails.NetworkGuard{
+		Resolver: fakeResolver{err: context.DeadlineExceeded},
+	}
+	res := g.Check(context.Background(), core.Identity{}, &core.Operation{}, netReq("https://unknown.example/"))
+	if res.OK {
+		t.Fatal("DNS failure must fail closed")
+	}
+}
+
+func TestNetworkGuardNestedWebhookField(t *testing.T) {
+	g := guardrails.NetworkGuard{SkipDNS: true}
+	req := &core.Request{Input: map[string]any{
+		"config": map[string]any{"url": "http://127.0.0.1/hook"},
+	}}
+	res := g.Check(context.Background(), core.Identity{}, &core.Operation{}, req)
+	if res.OK {
+		t.Fatal("nested private url must be blocked")
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -16,12 +17,16 @@ import (
 	"syscall"
 	"time"
 
+	loomgrpc "github.com/loreste/loom/adapters/grpc"
 	loomhttp "github.com/loreste/loom/adapters/http"
 	"github.com/loreste/loom/adapters/mcp"
 	"github.com/loreste/loom/bootstrap"
 	"github.com/loreste/loom/config"
 	"github.com/loreste/loom/core"
 	"github.com/loreste/loom/runtime"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 // Adapter wraps a runtime for CLI use.
@@ -58,9 +63,9 @@ func (a *Adapter) Run(ctx context.Context, args []string) int {
 	if len(args) < 1 {
 		fmt.Fprintln(a.errW(), `usage:
   loom exec <operation> [flags]
-  loom serve [--addr=:8080] [--data-dir=./data] [--database-url=postgres://...] [--redis-url=redis://...] [--tls-cert=] [--tls-key=] [--client-ca=]
-  loom mint-jwt --sub=user:alice --boundary=dev --caps=document.read
-  loom approve --token=appr-1 --principal=user:bob --op=payment.capture --boundary=dev
+  loom serve [--addr=:8080] [--grpc-addr=:9090] [--data-dir=./data] [--database-url=postgres://...] [--redis-url=redis://...] [--tls-cert=] [--tls-key=] [--client-ca=]
+  loom mint-jwt --sub=user:alice --boundary=dev --caps=document.read   # requires LOOM_DEV_TOOLS=1
+  loom approve --token=appr-1 --principal=user:bob --op=payment.capture --boundary=dev  # requires LOOM_DEV_TOOLS=1
   loom version`)
 		return 2
 	}
@@ -70,11 +75,19 @@ func (a *Adapter) Run(ctx context.Context, args []string) int {
 	case "serve":
 		return a.runServe(ctx, args[1:])
 	case "mint-jwt":
+		if !devToolsEnabled() {
+			fmt.Fprintln(a.errW(), "mint-jwt requires LOOM_DEV_TOOLS=1 (operator god-path; not for production)")
+			return 2
+		}
 		return a.runMintJWT(args[1:])
 	case "approve":
+		if !devToolsEnabled() {
+			fmt.Fprintln(a.errW(), "approve requires LOOM_DEV_TOOLS=1 (operator god-path; not for production)")
+			return 2
+		}
 		return a.runApprove(args[1:])
 	case "version":
-		fmt.Fprintln(a.outW(), "loom 0.2.1-phase2")
+		fmt.Fprintln(a.outW(), "loom 0.3.0")
 		return 0
 	case "help", "-h", "--help":
 		return a.Run(ctx, nil)
@@ -82,6 +95,12 @@ func (a *Adapter) Run(ctx context.Context, args []string) int {
 		fmt.Fprintln(a.errW(), "unknown command:", args[0])
 		return 2
 	}
+}
+
+// devToolsEnabled gates CLI privilege paths outside the governance pipeline.
+func devToolsEnabled() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("LOOM_DEV_TOOLS")))
+	return v == "1" || v == "true" || v == "yes"
 }
 
 func (a *Adapter) runExec(ctx context.Context, args []string) int {
@@ -127,6 +146,10 @@ func (a *Adapter) runExec(ctx context.Context, args []string) int {
 
 	approvalTok := flags["approval"]
 	if issue := flags["issue-approval"]; issue != "" && a.Platform != nil {
+		if !devToolsEnabled() {
+			fmt.Fprintln(a.errW(), "--issue-approval requires LOOM_DEV_TOOLS=1")
+			return 2
+		}
 		principal := flags["principal"]
 		if principal == "" {
 			fmt.Fprintln(a.errW(), "--issue-approval requires --principal=")
@@ -236,9 +259,15 @@ func (a *Adapter) runServe(ctx context.Context, args []string) int {
 	keyFile := flags["tls-key"]
 	clientCA := flags["client-ca"]
 	requireMTLS := flags["require-mtls"] == "true" || clientCA != ""
+	grpcAddr := flags["grpc-addr"]
+	if grpcAddr == "" {
+		grpcAddr = os.Getenv("LOOM_GRPC_ADDR")
+	}
 
+	var tlsCfg *tls.Config
 	if certFile != "" || keyFile != "" || clientCA != "" {
-		tlsCfg, err := loadServerTLS(certFile, keyFile, clientCA, requireMTLS)
+		var err error
+		tlsCfg, err = loadServerTLS(certFile, keyFile, clientCA, requireMTLS)
 		if err != nil {
 			fmt.Fprintln(a.errW(), "tls:", err)
 			return 2
@@ -284,17 +313,42 @@ func (a *Adapter) runServe(ctx context.Context, args []string) int {
 	}
 	fmt.Fprintf(a.errW(), "loom listening on %s (%s) POST /v1/execute%s\n", addr, mode, extra)
 
-	errCh := make(chan error, 1)
+	errCh := make(chan error, 2)
 	go func() {
 		if certFile != "" && keyFile != "" {
 			errCh <- srv.ListenAndServeTLS(certFile, keyFile)
 		} else if cfg.TLSConfig != nil {
-			// TLS config without files (tests inject certs) — use ListenAndServe with TLSConfig set
 			errCh <- srv.ListenAndServe()
 		} else {
 			errCh <- srv.ListenAndServe()
 		}
 	}()
+
+	var grpcSrv *grpc.Server
+	if grpcAddr != "" && grpcAddr != "off" && grpcAddr != "-" {
+		lis, err := net.Listen("tcp", grpcAddr)
+		if err != nil {
+			fmt.Fprintln(a.errW(), "grpc listen:", err)
+			return 2
+		}
+		var opts []grpc.ServerOption
+		// Cap message size (DoS).
+		opts = append(opts, grpc.MaxRecvMsgSize(1<<20), grpc.MaxSendMsgSize(1<<20))
+		if tlsCfg != nil && len(tlsCfg.Certificates) > 0 {
+			opts = append(opts, grpc.Creds(credentials.NewTLS(tlsCfg.Clone())))
+		} else {
+			opts = append(opts, grpc.Creds(insecure.NewCredentials()))
+		}
+		grpcSrv = grpc.NewServer(opts...)
+		if err := loomgrpc.Register(grpcSrv, rt); err != nil {
+			fmt.Fprintln(a.errW(), "grpc register:", err)
+			return 2
+		}
+		fmt.Fprintf(a.errW(), "loom gRPC listening on %s (loom.v1.Runtime/Execute)\n", grpcAddr)
+		go func() {
+			errCh <- grpcSrv.Serve(lis)
+		}()
+	}
 
 	sigCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -304,9 +358,16 @@ func (a *Adapter) runServe(ctx context.Context, args []string) int {
 		shCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(shCtx)
+		if grpcSrv != nil {
+			grpcSrv.GracefulStop()
+		}
 		fmt.Fprintln(a.errW(), "shutdown complete")
 		return 0
 	case err := <-errCh:
+		if grpcSrv != nil {
+			grpcSrv.GracefulStop()
+		}
+		_ = srv.Shutdown(context.Background())
 		if err != nil && err != http.ErrServerClosed {
 			fmt.Fprintln(a.errW(), err)
 			return 1
