@@ -231,8 +231,8 @@ func (s *Server) handleNotFound(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 }
 
-// handleManifest serves the static agent discovery document. Unauthenticated
-// by design: it contains no operation names and no per-caller data.
+// handleManifest serves the static discovery document. Unauthenticated by
+// design: it contains no operation names and no per-caller data.
 func (s *Server) handleManifest(w http.ResponseWriter, _ *http.Request) {
 	m := catalog.DefaultManifest("loom")
 	if s.Config.MCP == nil {

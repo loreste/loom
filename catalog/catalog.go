@@ -1,6 +1,6 @@
-// Package catalog generates agent-facing tool specifications from the
-// operation registry. Specs describe how to call an operation; they never
-// grant invoke rights — policy still enforces at runtime.
+// Package catalog generates tool specifications from the operation registry.
+// Specs describe how to call an operation; they never grant invoke rights —
+// policy still enforces at runtime.
 package catalog
 
 import (

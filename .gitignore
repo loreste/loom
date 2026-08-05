@@ -33,3 +33,13 @@ sdk/python/**/__pycache__/
 # Env secrets
 .env
 .env.*
+
+# Local assistant / IDE agent notes (not part of the application)
+AGENTS.md
+Claude.md
+CLAUDE.md
+.claude/
+.grok/
+.cursor/
+.codex/
+.kimi-code/

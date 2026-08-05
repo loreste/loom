@@ -40,20 +40,18 @@ go run ./cmd/loom serve --addr=:8080
 
 Same `Runtime.Execute` path. Remote SDKs cannot grant themselves power.
 
-### Agent-facing discovery
+### Discovery (optional network edge)
 
-Agents consume a Loom app without a bespoke REST API:
+Clients can discover how to call a Loom service without a hand-rolled API catalog:
 
-1. `GET /.well-known/loom.json` — static discovery manifest (unauthenticated, no operation data).
-2. `GET /v1/openapi.json` — capability-filtered OpenAPI 3 document (auth required for tool paths).
-3. Call `catalog.spec` via `POST /v1/execute` (or `app.Call`) — returns `catalog.ToolSpec`s
-   (name, description, input/output JSON Schema, risk, effects, approval/idempotency
-   requirements) **filtered to the caller's capabilities**. Ops without static
-   permissions are never listed.
-4. Optionally `POST /mcp` for JSON-RPC `tools/list` + `tools/call` (same pipeline).
-5. Invoke operations via the same execute endpoint. Denials carry stable `reason`
-   codes plus agent-actionable `hint` and `retryable` fields; internal error detail
-   is recorded in audit only, never returned to callers.
+1. `GET /.well-known/loom.json` — static discovery (unauthenticated; no operation list).
+2. `GET /v1/openapi.json` — OpenAPI 3 filtered to the caller's capabilities.
+3. `catalog.spec` via `POST /v1/execute` — tool-style specs (schema, risk, approval,
+   idempotency) for ops the caller can use.
+4. Optionally `POST /mcp` for `tools/list` + `tools/call` (same pipeline).
+5. Invoke via `POST /v1/execute`. Denials use stable `reason` codes plus optional
+   `hint` / `retryable`; internal detail stays in audit only.
+
 
 ## Connecting databases
 
