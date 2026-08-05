@@ -31,11 +31,10 @@ jobs:
       - name: Build
         run: go build ./...
 
-  # Optional Postgres integration when LOOM_DATABASE_URL is provided via secrets.
   postgres:
     name: postgres-integration
     runs-on: ubuntu-latest
-    if: ${{ false }} # enable when LOOM_DATABASE_URL secret is configured
+    timeout-minutes: 15
     services:
       postgres:
         image: postgres:16

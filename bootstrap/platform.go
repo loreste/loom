@@ -465,26 +465,27 @@ func (p *Platform) registerDomains() error {
 func (p *Platform) seedDemoPrincipals() error {
 	if err := p.Memory.Register(identity.StaticPrincipal{
 		ID: "user:alice", Type: "user", Boundary: "dev", Token: "alice-secret-token",
-		Capabilities: []string{"document.read", "document.write", "ai.complete"},
+		// catalog.spec lets agents discover callable tools for this principal.
+		Capabilities: []string{"document.read", "document.write", "ai.complete", "catalog.spec"},
 	}); err != nil {
 		return err
 	}
 	if err := p.Memory.Register(identity.StaticPrincipal{
 		ID: "user:bob", Type: "user", Boundary: "dev", Token: "bob-finance-token",
-		Capabilities: []string{"payment.capture", "payment.refund", "document.read"},
+		Capabilities: []string{"payment.capture", "payment.refund", "document.read", "catalog.spec"},
 	}); err != nil {
 		return err
 	}
 	if err := p.Memory.Register(identity.StaticPrincipal{
 		ID: "user:ops", Type: "user", Boundary: "staging", Token: "ops-deploy-token",
-		Capabilities: []string{"deployment.release", "server.restart", "document.read"},
+		Capabilities: []string{"deployment.release", "server.restart", "document.read", "catalog.spec"},
 	}); err != nil {
 		return err
 	}
 	if err := p.Memory.Register(identity.StaticPrincipal{
 		ID: "user:approver", Type: "user", Boundary: "dev", Token: "approver-admin-token",
 		Capabilities: []string{
-			"approval.issue", "catalog.list", "document.read",
+			"approval.issue", "catalog.list", "catalog.spec", "document.read",
 			"policy.publish", "policy.get",
 		},
 	}); err != nil {
@@ -492,7 +493,7 @@ func (p *Platform) seedDemoPrincipals() error {
 	}
 	if err := p.Memory.Register(identity.StaticPrincipal{
 		ID: "agent:assistant", Type: "agent", Boundary: "dev", Token: "agent-token-dev",
-		Capabilities: []string{"ai.complete", "ai.tool_call", "document.read"},
+		Capabilities: []string{"ai.complete", "ai.tool_call", "document.read", "catalog.spec"},
 	}); err != nil {
 		return err
 	}
@@ -528,16 +529,21 @@ func (p *Platform) seedDemoPrincipals() error {
 		{Principal: "user:alice", Boundary: "dev", Operation: "document.read", Priority: 10},
 		{Principal: "user:alice", Boundary: "dev", Operation: "document.write", Priority: 10},
 		{Principal: "user:alice", Boundary: "dev", Operation: "ai.complete", Priority: 10},
+		{Principal: "user:alice", Boundary: "dev", Operation: "catalog.spec", Priority: 10},
 		{Principal: "user:bob", Boundary: "dev", Operation: "payment.capture", Priority: 10},
 		{Principal: "user:bob", Boundary: "dev", Operation: "payment.refund", Priority: 10},
 		{Principal: "user:bob", Boundary: "dev", Operation: "document.read", Priority: 5},
+		{Principal: "user:bob", Boundary: "dev", Operation: "catalog.spec", Priority: 10},
 		{Principal: "user:ops", Boundary: "staging", Operation: "deployment.release", Priority: 10},
 		{Principal: "user:ops", Boundary: "staging", Operation: "server.restart", Priority: 10},
 		{Principal: "user:ops", Boundary: "dev", Operation: "document.read", Priority: 5},
+		{Principal: "user:ops", Boundary: "dev", Operation: "catalog.spec", Priority: 10},
+		{Principal: "user:ops", Boundary: "staging", Operation: "catalog.spec", Priority: 10},
 		{Principal: "user:ops", Operation: "server.destroy", Deny: true, Priority: 100},
 		{Principal: "user:approver", Boundary: "dev", Operation: "approval.issue", Priority: 20},
 		{Principal: "user:approver", Boundary: "staging", Operation: "approval.issue", Priority: 20},
 		{Principal: "user:approver", Boundary: "dev", Operation: "catalog.list", Priority: 10},
+		{Principal: "user:approver", Boundary: "dev", Operation: "catalog.spec", Priority: 10},
 		{Principal: "user:approver", Boundary: "dev", Operation: "document.read", Priority: 5},
 		{Principal: "user:approver", Boundary: "dev", Operation: "policy.publish", Priority: 20},
 		{Principal: "user:approver", Boundary: "dev", Operation: "policy.get", Priority: 10},
@@ -546,6 +552,7 @@ func (p *Platform) seedDemoPrincipals() error {
 		{Principal: "agent:assistant", Boundary: "dev", Operation: "ai.complete", Priority: 10},
 		{Principal: "agent:assistant", Boundary: "dev", Operation: "ai.tool_call", Priority: 10},
 		{Principal: "agent:assistant", Boundary: "dev", Operation: "document.read", Priority: 5},
+		{Principal: "agent:assistant", Boundary: "dev", Operation: "catalog.spec", Priority: 10},
 		{Principal: "svc:payments", Boundary: "dev", Operation: "payment.capture", Priority: 10},
 	}
 	for _, r := range rules {
@@ -580,21 +587,27 @@ func (p *Platform) seedDemoPrincipals() error {
 		{"user:alice", "dev", "document.read", []string{"id", "title", "body", "status"}},
 		{"user:alice", "dev", "document.write", []string{"id", "title", "status"}},
 		{"user:alice", "dev", "ai.complete", []string{"completion_id", "text", "echo_preview"}},
+		{"user:alice", "dev", "catalog.spec", []string{"tools", "count"}},
 		{"user:bob", "dev", "payment.capture", []string{"payment_id", "status", "amount", "currency", "merchant_id"}},
 		{"user:bob", "dev", "payment.refund", []string{"refund_id", "payment_id", "status", "amount"}},
 		{"user:bob", "dev", "document.read", []string{"id", "title"}},
+		{"user:bob", "dev", "catalog.spec", []string{"tools", "count"}},
 		{"user:ops", "staging", "deployment.release", []string{"*"}},
 		{"user:ops", "staging", "server.restart", []string{"*"}},
 		{"user:ops", "dev", "document.read", []string{"id", "title"}},
+		{"user:ops", "dev", "catalog.spec", []string{"tools", "count"}},
+		{"user:ops", "staging", "catalog.spec", []string{"tools", "count"}},
 		{"user:approver", "dev", "approval.issue", []string{"status", "token", "principal", "operation", "boundary", "ttl_seconds", "max_risk", "issued_by"}},
 		{"user:approver", "staging", "approval.issue", []string{"status", "token", "principal", "operation", "boundary", "ttl_seconds", "max_risk", "issued_by"}},
 		{"user:approver", "dev", "catalog.list", []string{"operations", "count"}},
+		{"user:approver", "dev", "catalog.spec", []string{"tools", "count"}},
 		{"user:approver", "dev", "document.read", []string{"id", "title"}},
 		{"user:approver", "dev", "policy.publish", []string{"status", "version", "id", "rule_count", "published_by"}},
 		{"user:approver", "dev", "policy.get", []string{"id", "version", "rule_count", "rules", "updated_at"}},
 		{"agent:assistant", "dev", "ai.complete", []string{"completion_id", "text", "echo_preview"}},
 		{"agent:assistant", "dev", "ai.tool_call", []string{"tool_call_id", "tool", "status"}},
 		{"agent:assistant", "dev", "document.read", []string{"id", "title", "body"}},
+		{"agent:assistant", "dev", "catalog.spec", []string{"tools", "count"}},
 		{"svc:payments", "dev", "payment.capture", []string{"payment_id", "status", "amount", "currency", "merchant_id"}},
 	}
 	for _, g := range fieldGrants {

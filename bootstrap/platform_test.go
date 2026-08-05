@@ -28,6 +28,19 @@ func TestPlatformDenyByDefaultUnknownUser(t *testing.T) {
 
 func TestAliceCannotCapturePayment(t *testing.T) {
 	p, _ := bootstrap.NewPlatform(bootstrap.Config{})
+	// alice can discover her tools via catalog.spec
+	spec := p.Runtime.Execute(context.Background(), core.Request{
+		Operation:   "catalog.spec",
+		Credentials: core.Credentials{Token: "alice-secret-token"},
+		Boundary:    "dev",
+	})
+	if !spec.Allowed {
+		t.Fatalf("catalog.spec: %+v", spec.Denial)
+	}
+	if _, ok := spec.Output["tools"]; !ok {
+		t.Fatal("expected tools in catalog.spec output")
+	}
+
 	_ = p.IssueApproval("a", "user:alice", "payment.capture", "dev", core.RiskCritical, time.Hour)
 	resp := p.Runtime.Execute(context.Background(), core.Request{
 		Operation:      "payment.capture",

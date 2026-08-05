@@ -25,9 +25,10 @@ Your code  →  app.Call / Runtime.Execute  →  Handler / DB executor
 
 ```bash
 go test -race ./...
-go run ./examples/embed/        # governed SQL ops
-go run ./examples/orders-app/   # product ops; callers never send SQL
-go run ./examples/worker/       # job queue → Loom (no HTTP)
+go run ./examples/embed/         # governed SQL ops
+go run ./examples/orders-app/    # product ops; callers never send SQL
+go run ./examples/worker/        # job queue → Loom (no HTTP)
+go run ./examples/agent-client/  # manifest → openapi → MCP → execute
 ```
 
 Deep dive: [`docs/EMBED.md`](docs/EMBED.md)

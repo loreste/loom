@@ -8,6 +8,11 @@ cd "$ROOT"
 export LOOM_DATA_DIR="${LOOM_DATA_DIR:-$ROOT/.loom-data}"
 mkdir -p "$LOOM_DATA_DIR"
 
+echo "==> catalog.spec (alice — agent tool discovery)"
+LOOM_TOKEN=alice-secret-token go run ./cmd/loom exec catalog.spec \
+  --boundary=dev \
+  --input='{}' | head -40
+
 echo "==> document.read (alice)"
 LOOM_TOKEN=alice-secret-token go run ./cmd/loom exec document.read \
   --boundary=dev \

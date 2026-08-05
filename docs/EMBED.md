@@ -45,13 +45,17 @@ Same `Runtime.Execute` path. Remote SDKs cannot grant themselves power.
 Agents consume a Loom app without a bespoke REST API:
 
 1. `GET /.well-known/loom.json` — static discovery manifest (unauthenticated, no operation data).
-2. Call `catalog.spec` via `POST /v1/execute` (or `app.Call`) — returns `catalog.ToolSpec`s
+2. `GET /v1/openapi.json` — capability-filtered OpenAPI 3 document (auth required for tool paths).
+3. Call `catalog.spec` via `POST /v1/execute` (or `app.Call`) — returns `catalog.ToolSpec`s
    (name, description, input/output JSON Schema, risk, effects, approval/idempotency
    requirements) **filtered to the caller's capabilities**. Ops without static
    permissions are never listed.
-3. Invoke operations via the same execute endpoint. Denials carry stable `reason`
+4. Optionally `POST /mcp` for JSON-RPC `tools/list` + `tools/call` (same pipeline).
+5. Invoke operations via the same execute endpoint. Denials carry stable `reason`
    codes plus agent-actionable `hint` and `retryable` fields; internal error detail
    is recorded in audit only, never returned to callers.
+
+End-to-end walkthrough: `go run ./examples/agent-client/`.
 
 ## Connecting databases
 
