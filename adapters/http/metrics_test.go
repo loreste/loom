@@ -19,7 +19,7 @@ func TestMetricsEndpointIsOptInAndVersioned(t *testing.T) {
 	t.Cleanup(func() { _ = p.Close() })
 	m := runtime.NewMetrics()
 	m.Observe(runtime.Observation{Decision: core.DecisionDeny, Step: "authenticate", Reason: core.ReasonUnauthenticated})
-	srv, err := NewServer(p.Runtime, ServerConfig{Metrics: m})
+	srv, err := NewServer(p.Runtime, ServerConfig{Metrics: m, MetricsPublic: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,5 +34,22 @@ func TestMetricsEndpointIsOptInAndVersioned(t *testing.T) {
 	}
 	if !strings.Contains(res.Body.String(), "loom_execute_denied_total 1") {
 		t.Fatalf("metrics = %s", res.Body.String())
+	}
+}
+
+func TestMetricsEndpointRequiresExplicitAccess(t *testing.T) {
+	p, err := bootstrap.NewPlatform(bootstrap.Config{PolicySyncInterval: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = p.Close() })
+	srv, err := NewServer(p.Runtime, ServerConfig{Metrics: runtime.NewMetrics()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d", rr.Code)
 	}
 }

@@ -1,173 +1,205 @@
 # Loom
 
 Loom is an embed-first governance runtime for Go applications. It puts one
-controlled execution boundary in front of handlers, database operations,
-background jobs, payments, provisioning, and administrative actions.
+controlled execution path in front of operations that call handlers, access a
+database, run jobs, change payments or credit, provision services, or perform
+administrative work.
 
-Loom has been used internally for the past two months. We are now open-sourcing
-it so teams can inspect the design, use the runtime in their own applications,
-and contribute improvements to a problem we have been solving in practice.
-
-Applications need this because sensitive work rarely has only one entry point.
-The same operation may be reachable through an HTTP request, a worker, an
-internal service, an MCP tool, or in-process code. If each path implements its
-own authentication, authorization, tenant checks, approvals, and auditing,
-the rules drift and one path eventually becomes a bypass.
-
-Loom routes those paths through `app.Call` / `Runtime.Execute`. It is
-deny-by-default, fail-closed, and designed to keep the enforcement logic shared
-when a new adapter or worker is added. Read the full explanation in
-[`docs/OVERVIEW.md`](docs/OVERVIEW.md), then use [`docs/INSTALL.md`](docs/INSTALL.md)
-to get started.
-
-Loom is a small Go library that sits in front of the parts of your app that
-actually do things—call a handler, touch a database, run a job—and decides
-whether that call is allowed.
-
-You embed it in your process. There is no separate authz service to deploy
-unless you want one later. HTTP, MCP, GraphQL, and gRPC are optional adapters
-on top of the same runtime; they do not get a shortcut around it.
-
-**Status:** v0.1.1. Useful if you are building in Go and want a single place
-for identity, policy, and safe DB access. Not a full identity platform, not
-an ORM, and not a replacement for careful application design.
+Loom has been used internally for the past two months. We are now making it
+available as open source so the implementation, examples, and trade-offs can
+be reviewed and used by other teams.
 
 ## Why it exists
 
-A lot of internal tools end up with the same mess:
+Sensitive operations usually acquire several entry points as an application
+grows: an HTTP endpoint, a worker, an internal service, an administrative CLI,
+an MCP tool, or code running in the same process. When each entry point carries
+its own checks, the rules can diverge.
 
-- Product code that talks straight to the database
-- Authz rules scattered across middleware, SQL, and ad-hoc checks
-- A growing pile of endpoints that each reimplement “who can do what”
-- Workers or other callers that need the same rules without a second stack
+That divergence creates practical problems:
 
-Loom is aimed at that middle ground: **named operations go through one
-pipeline**, and the pipeline is deny-by-default. If you need network access
-later, you expose the same pipeline—not a second, weaker path.
+- one transport checks a permission that another transport misses;
+- a worker can perform an operation that the user-facing path rejects;
+- application code reaches the database without the same policy checks;
+- retries repeat an operation with side effects;
+- tenant context is lost before a database query runs; and
+- an operator cannot easily see which check caused a denial.
 
-It will not invent your product model for you. You still register users (or
-wire a real verifier), write allow rules, and design tenancy carefully.
-What it does give you is a consistent enforcement point and some hard
-defaults around SQL and side effects.
+Loom addresses this by making the operation, rather than the transport, the
+unit of authorization. HTTP, MCP, GraphQL, gRPC, Weft, workers, and in-process
+callers can all reach the same runtime.
 
 ## How it works
 
-```
-your code  →  app.Call / Runtime.Execute  →  handler or db.Executor
-                     ↑
-        identity, boundary, policy, guardrails,
-        risk, approval, quotas, idempotency, audit
+Application code registers named operations and invokes them through
+`app.Call` or `runtime.Runtime.Execute`:
+
+```text
+caller or adapter
+        → identity and boundary checks
+        → operation and resource policy
+        → contextual policy and guardrails
+        → risk, approval, idempotency, and quota checks
+        → handler or governed database executor
+        → output filtering and audit
 ```
 
-Anything that should be governed is an **operation** (`order.create`,
-`db.query`, …). Callers never get a raw `*sql.DB`. Database access goes
-through a pool registry and a SQL classifier that rejects multi-statement
-queries, comments, DDL, and a set of dangerous functions. Table allowlists
-and boundary pins are optional but recommended.
+The default decision is deny. Unknown operations, missing rules, failed
+verification, invalid boundaries, and enforcement errors fail closed. Approval
+tokens are consumed before side effects, and idempotency can protect retries.
 
-Default decision is **deny**. Missing rules, eval errors, and most
-misconfiguration fail closed rather than open.
+Database access is registered through Loom's database layer rather than passed
+to application callers as a raw `*sql.DB`. The SQL guard rejects classes of
+input such as multi-statement queries, comments, DDL, and dangerous functions.
+It is an additional check, not a replacement for restricted database roles,
+PostgreSQL RLS, timeouts, and tenant-aware transactions.
+
+## What Loom is and is not
+
+Loom provides:
+
+- an embedded authorization and execution pipeline;
+- a registry for governed operations;
+- resource and field-level access checks;
+- approvals, risk classification, quotas, and idempotency controls;
+- governed database access;
+- output filtering, redaction, and audit events; and
+- optional protocol adapters using the same runtime.
+
+Loom is not an identity provider, an OIDC service, an ORM, or a guarantee of
+tenant isolation by itself. Production applications still need a real identity
+verifier, durable security state, restricted database credentials, database
+isolation, and operational monitoring. Loom also does not define an
+application's domain model or decide which operations an application should
+allow.
+
+## Status
+
+The current public release is `v0.1.1`. It is an early open-source release.
+The runtime has been exercised internally and includes tests across its main
+packages. Production integrations, packaging, and documentation will continue
+to evolve with use.
 
 ## Quick start
 
-New users: start with [`docs/INSTALL.md`](docs/INSTALL.md), then follow
-[`docs/HOWTO.md`](docs/HOWTO.md). The shortest local path is:
+Start with the [installation guide](docs/INSTALL.md) and then follow the
+[how-to guide](docs/HOWTO.md):
 
 ```bash
 git clone https://github.com/loreste/loom.git
 cd loom
 make build
-go run ./examples/orders-app/
+LOOM_EXAMPLE_TOKEN="$(openssl rand -hex 24)" go run ./examples/orders-app/
 ```
+
+Other local examples:
 
 ```bash
+LOOM_EXAMPLE_TOKEN="$(openssl rand -hex 24)" \\
+LOOM_EXAMPLE_APPROVAL_TOKEN="$(openssl rand -hex 24)" \\
+go run ./examples/embed/         # governed SQLite access in-process
+LOOM_WORKER_TOKEN="$(openssl rand -hex 24)" go run ./examples/worker/ # jobs that use the same Call path
 go test -race ./...
-
-go run ./examples/embed/         # governed SQL against SQLite in-process
-go run ./examples/orders-app/    # product ops; callers never send SQL
-go run ./examples/worker/        # jobs that only run via Call
 ```
 
-Embedding without a server:
+To add Loom to a Go application, use the tagged module release:
+
+```bash
+go get github.com/loreste/loom@v0.1.1
+```
+
+Then register operations and call them through the application API:
 
 ```go
 a, err := app.New(app.Config{})
-// register DB pool, ops, users, grants…
-resp := a.Call(ctx, core.Request{
-    Operation:   "order.create",
-    Credentials: core.Credentials{Token: token},
-    Boundary:    "dev",
-    // …
+if err != nil {
+	return err
+}
+
+response := a.Call(ctx, core.Request{
+	Operation: "order.create",
+	Credentials: core.Credentials{
+		Scheme: "bearer",
+		Token:  token,
+	},
+	Boundary: "development",
+	Input: map[string]any{
+		"sku": "example-sku",
+	},
 })
-if !resp.Allowed {
-    // Denial has a stable reason (and optional hint / retryable)
+if !response.Allowed {
+	return fmt.Errorf("operation denied: %s", response.Denial.Reason)
 }
 ```
 
-There is also `app.Bootstrap` if you want migrate → open pool → seed users
-in one step. Details: [`docs/EMBED.md`](docs/EMBED.md).
+See [EMBED.md](docs/EMBED.md) for database registration, bootstrapping, and
+background jobs.
 
-## Optional network edge
+## Optional network adapters
 
-Same runtime, different transports:
+When callers need a network interface, run the HTTP and gRPC adapters or use
+the other adapters in the repository. They all translate requests into the
+same execution path:
 
 ```bash
 go run ./cmd/loom serve --addr=:8080 --grpc-addr=:9090
 ```
 
-| Path | Role |
-|------|------|
-| `POST /v1/execute` | Call an operation |
-| `GET /.well-known/loom.json` | Static discovery (no op list) |
-| `GET /v1/openapi.json` | Capability-filtered OpenAPI |
-| `POST /mcp` | MCP tools/list + tools/call |
-| `POST /graphql` | `mutation { execute(...) }` |
-| gRPC `loom.v1.Runtime/Execute` | Same as execute |
+| Interface | Entry point |
+| --- | --- |
+| HTTP | `POST /v1/execute` |
+| Discovery | `GET /.well-known/loom.json` |
+| OpenAPI | `GET /v1/openapi.json` |
+| MCP | `POST /mcp` |
+| GraphQL | `POST /graphql` |
+| gRPC | `loom.v1.Runtime/Execute` |
 
-Remote SDKs (Go / Python / TypeScript / Rust) only talk to that edge. They
-cannot grant themselves power.
+The Go, Python, TypeScript, and Rust SDKs call the HTTP adapter. They do not
+grant themselves additional permissions.
 
-For anything beyond local demos, set production flags (durable store, no
-demo principals, real JWT secret). See [`docs/SECURITY.md`](docs/SECURITY.md).
+## Production considerations
 
-## CLI
+Do not expose the development configuration on a public network. Before using
+Loom in production, configure a real identity verifier, disable demo
+principals, and use durable stores for approvals, idempotency, quotas, and
+audit as appropriate for the deployment.
 
-```bash
-go build -o loom ./cmd/loom
-./loom version
-./loom serve --addr=:8080
-```
+Read:
 
-Version string defaults to the value in `VERSION` (0.1.1) unless you inject
-ldflags yourself.
+- [SECURITY.md](docs/SECURITY.md) for the security model and limits;
+- [IDENTITY.md](docs/IDENTITY.md) for OIDC/JWKS and mTLS integration;
+- [TENANCY.md](docs/TENANCY.md) and the [tenant example](examples/tenancy/README.md)
+  for application and database isolation;
+- [OBSERVABILITY.md](docs/OBSERVABILITY.md) for metrics and tracing; and
+- [COMPATIBILITY.md](docs/COMPATIBILITY.md) for protocol and SDK contracts.
 
-## What is in the tree
+## Repository layout
 
 | Area | Purpose |
-|------|---------|
-| `app`, `runtime` | Embed API and enforcement pipeline |
-| `db` | Pools, SQL guard, migrator, governed query/exec |
-| `policy`, `identity`, `boundary`, `resource`, … | Building blocks |
-| `adapters/*` | Optional HTTP / CLI / MCP / GraphQL / gRPC / Weft |
-| `store/postgres`, Redis quotas | Durable backends when you need them |
-| `examples/*` | Small runnable demos, not production apps |
+| --- | --- |
+| `app`, `runtime` | Embed API and execution pipeline |
+| `db` | Database pools, SQL checks, migrations, and governed queries |
+| `policy`, `identity`, `boundary`, `resource` | Policy building blocks |
+| `approval`, `risk`, `quotas`, `idempotency`, `audit` | Execution controls and records |
+| `adapters/*` | Optional HTTP, CLI, MCP, GraphQL, gRPC, and Weft adapters |
+| `store/postgres` | Durable PostgreSQL backends |
+| `sdk/*` | Go, Python, TypeScript, and Rust clients |
+| `examples/*` | Runnable examples; not production applications |
 
-## Honest limits
+## Tests
 
-- **Tenancy:** Loom enforces boundaries and ACLs at the app layer. Sharing
-  one table across tenants still needs RLS, separate pools, or SQL that
-  always filters by tenant. See [`docs/TENANCY.md`](docs/TENANCY.md).
-- **Identity:** Static tokens and demo JWTs are for development. Wire a
-  real verifier for production.
-- **Demo users:** The CLI platform ships known tokens when demos are
-  enabled. Do not expose that configuration on a public network.
+The main CI workflow runs Go vet, race-enabled tests, runtime fuzzing, builds,
+PostgreSQL integration tests, SDK checks, and cross-SDK contract tests. Local
+Go checks are:
 
-Production construction, identity integration, compatibility guarantees,
-observability, and the tenant/RLS reference are documented in
-[`docs/BUILD.md`](docs/BUILD.md), [`docs/IDENTITY.md`](docs/IDENTITY.md),
-[`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md),
-[`docs/OBSERVABILITY.md`](docs/OBSERVABILITY.md), and
-[`examples/tenancy/README.md`](examples/tenancy/README.md).
+```bash
+go vet ./...
+go test -race ./...
+go test -fuzz=FuzzExecute -fuzztime=15s ./runtime/
+go build ./...
+```
+
+Language-specific SDK checks are documented in the SDK READMEs and run in CI.
 
 ## License
 

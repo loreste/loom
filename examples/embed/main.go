@@ -1,6 +1,6 @@
 // Command embed demonstrates building with Loom without any HTTP API.
 //
-//	go run ./examples/embed/
+//	LOOM_EXAMPLE_TOKEN="$(openssl rand -hex 24)" LOOM_EXAMPLE_APPROVAL_TOKEN="$(openssl rand -hex 24)" go run ./examples/embed/
 //
 // Flow: Bootstrap → migrate → open DB → least-privilege grants → db.exec/db.query
 // through the full security pipeline (authn, policy, SQL guardrails, audit).
@@ -30,6 +30,14 @@ func main() {
 
 func run() error {
 	ctx := context.Background()
+	token := os.Getenv("LOOM_EXAMPLE_TOKEN")
+	if token == "" {
+		return fmt.Errorf("LOOM_EXAMPLE_TOKEN is required for this example")
+	}
+	approvalToken := os.Getenv("LOOM_EXAMPLE_APPROVAL_TOKEN")
+	if approvalToken == "" {
+		return fmt.Errorf("LOOM_EXAMPLE_APPROVAL_TOKEN is required for this example")
+	}
 
 	// One-shot embed setup: no server, no REST.
 	res, err := app.Bootstrap(ctx, app.BootstrapConfig{
@@ -52,7 +60,7 @@ func run() error {
 		}},
 		EnableDBOps: true,
 		Users: []app.SeedUser{{
-			ID: "user:dev", Token: "dev-token", Home: "dev",
+			ID: "user:dev", Token: token, Home: "dev",
 			Caps: []string{"db.query", "db.exec"},
 			DB: &app.DBAccess{
 				Pool: "appdb", Query: true, Exec: true,
@@ -66,14 +74,14 @@ func run() error {
 	a := res.App
 
 	// Writes are high-risk → approval required.
-	if err := a.IssueApproval("note-appr", "user:dev", "db.exec", "dev", core.RiskCritical, time.Hour); err != nil {
+	if err := a.IssueApproval(approvalToken, "user:dev", "db.exec", "dev", core.RiskCritical, time.Hour); err != nil {
 		return err
 	}
 
 	// All data access goes through Loom.Call (same pipeline as HTTP would use).
 	write := a.Call(ctx, core.Request{
 		Operation:   "db.exec",
-		Credentials: core.Credentials{Token: "dev-token"},
+		Credentials: core.Credentials{Token: token},
 		Boundary:    "dev",
 		Resource:    &core.ResourceRef{Type: "db", ID: "appdb"},
 		Input: map[string]any{
@@ -82,7 +90,7 @@ func run() error {
 			"args": []any{"hello from embedded Loom", time.Now().UTC().Format(time.RFC3339)},
 		},
 		IdempotencyKey: "note-1",
-		ApprovalToken:  "note-appr",
+		ApprovalToken:  approvalToken,
 	})
 	printJSON("db.exec", write)
 	if !write.Allowed {
@@ -91,7 +99,7 @@ func run() error {
 
 	read := a.Call(ctx, core.Request{
 		Operation:   "db.query",
-		Credentials: core.Credentials{Token: "dev-token"},
+		Credentials: core.Credentials{Token: token},
 		Boundary:    "dev",
 		Resource:    &core.ResourceRef{Type: "db", ID: "appdb"},
 		Input: map[string]any{
@@ -107,7 +115,7 @@ func run() error {
 	// Blocked: table outside allowlist
 	blocked := a.Call(ctx, core.Request{
 		Operation:   "db.query",
-		Credentials: core.Credentials{Token: "dev-token"},
+		Credentials: core.Credentials{Token: token},
 		Boundary:    "dev",
 		Resource:    &core.ResourceRef{Type: "db", ID: "appdb"},
 		Input: map[string]any{

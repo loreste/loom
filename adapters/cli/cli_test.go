@@ -9,11 +9,12 @@ import (
 	"github.com/loreste/loom/adapters/cli"
 	"github.com/loreste/loom/bootstrap"
 	"github.com/loreste/loom/core"
+	"github.com/loreste/loom/internal/testtokens"
 )
 
 func newTestAdapter(t *testing.T) (*cli.Adapter, *bytes.Buffer, *bytes.Buffer) {
 	t.Helper()
-	p, err := bootstrap.NewPlatform(bootstrap.Config{PolicySyncInterval: -1, DisableSeedPolicyPublish: true})
+	p, err := bootstrap.NewPlatform(bootstrap.Config{PolicySyncInterval: -1, DisableSeedPolicyPublish: true, DemoTokens: testtokens.Demo()})
 	if err != nil {
 		t.Fatal(err)
 	}

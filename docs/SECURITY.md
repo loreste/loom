@@ -1,58 +1,66 @@
-# Loom security notes (white-hat review)
+# Loom security notes
 
-Last review: 2026-08-05. Scope: full pipeline + all adapters + bootstrap defaults.
+Loom has been used internally for the past two months and is now being
+reviewed as an open-source project. This document describes the controls in
+the current repository and the responsibilities that remain with a deploying
+application.
 
-## Non-negotiables (status)
+## Runtime guarantees
 
-| Control | Status |
-|---------|--------|
-| Default DENY | Hold |
-| Fail closed | Hold |
-| Single entrypoint (`Runtime.Execute`) | Hold — all adapters |
-| No adapter privilege / bypass headers | Hold — tripwires deny |
-| Core free of adapters | Hold |
-| Secrets not in caller denials | Hold (`SafeDenial`) |
-| Approval tokens hashed | Hold |
-| SQL fail-closed class + allowlist | Hold (hardened) |
+- Decisions default to deny.
+- Authentication, delegation, tenant resolution, boundary membership, policy,
+  resources, guardrails, risk, idempotency, approvals, quotas, execution,
+  output filtering, and audit all run through one pipeline.
+- Enforcement errors and panics fail closed.
+- Approval tokens are hashed and consumed before handlers run.
+- Idempotency state is scoped by principal, boundary, operation, and key.
+- Caller-supplied bypass headers and body credentials do not grant privilege.
+- Audit input is recursively redacted by value and sensitive field name.
+- SQL rejects multi-statements, comments, DDL/admin statements, dangerous
+  constructs, and unallowlisted function calls. It is not a parser-grade
+  database sandbox.
+- Tenant-aware pools can require a PostgreSQL transaction-local RLS setting;
+  direct pooled queries and tenant-setting mutation are refused.
 
-## Fixes applied this review
+## Transport requirements
 
-1. **Approval dual-exec (CRITICAL)** — `Consume` now claims the single-use token **immediately before the handler** (after Evaluate + quotas + idempotency Begin). Concurrent callers: exactly one allow. Handler failure burns the token (fail closed for money ops).
-2. **Idempotency Complete after success** — errors are logged; key is **not** aborted after a successful handler (prevents second side-effect).
-3. **Postgres idempotency Begin race** — insert uses `ON CONFLICT DO NOTHING`; lost races return conflict.
-4. **Approval Issue cannot resurrect tokens** — memory/file/postgres refuse re-issue of an existing/consumed hash.
-5. **mTLS fingerprint spoofing (HIGH)** — `MTLSVerifier` requires `Claims["peer_verified"]=1`, set only by `CredentialsFromCertificate` (HTTP TLS peer). Weft/body cannot forge mTLS with a known fingerprint.
-6. **MCP HTTP auth precedence (HIGH)** — transport `Authorization` locks the token; JSON-RPC body cannot override.
-7. **SQL allowlist empty-table bypass (HIGH)** — with non-empty `AllowedTables`, statements that extract zero tables are denied.
-8. **`catalog.list` enumeration (MEDIUM)** — capability-filtered like `catalog.spec`.
-9. **GraphQL recon (MEDIUM)** — introspection disabled by default; body limit follows HTTP `MaxBodyBytes`.
-10. **Hostile header coverage** — shared `applyHostileHeaders` on execute + aliases.
-11. **Production serve hardening** — `LOOM_ENV=production|staging` requires `LOOM_DISABLE_DEMO_PRINCIPALS`, `LOOM_JWT_SECRET`, and `LOOM_REQUIRE_DURABLE`. Demo tokens log a loud WARNING.
-12. **CLI god-paths** — `mint-jwt`, `approve`, `--issue-approval` require `LOOM_DEV_TOOLS=1`.
-13. **NetworkGuard DNS** — hostnames are resolved; any private/link-local/metadata answer is denied; DNS errors fail closed. Nested `url`/`host` fields scanned.
-14. **gRPC on serve** — `--grpc-addr=:9090` (or `LOOM_GRPC_ADDR`) starts `loom.v1.Runtime/Execute` with 1 MiB message caps.
-15. **HTTP edge rate limit** — `LOOM_HTTP_RATE_LIMIT` (req/min per IP); healthz/readyz exempt; does not trust `X-Forwarded-For`.
-16. **GraphQL credentials** — same `ExtractCredentials` as HTTP (bearer + mTLS peer cert).
+The HTTP adapter only treats a client certificate as mTLS identity when the
+TLS connection has a verified chain. A fingerprint or presented certificate is
+not sufficient.
 
-## Residual risk (accepted / deferred)
+Production-like CLI serving requires TLS certificates for direct HTTP and gRPC
+listeners. TLS termination by a trusted proxy must be explicitly configured
+with `LOOM_TRUSTED_TLS_PROXY=true`; that proxy and its network boundary remain
+deployment responsibilities.
 
-| Item | Severity | Notes |
-|------|----------|--------|
-| Demo principals in default **development** serve | MED | Intentional for demos; production profile blocks them |
-| CLI `approve` / `mint-jwt` | LOW | Gated by `LOOM_DEV_TOOLS=1` |
-| Nested field ACL depth | MED | Field grants still top-level `*`; secrets redacted recursively |
-| No edge rate limit before auth | LOW | Rely on reverse proxy |
-| DB multi-tenant row isolation | HIGH if shared pool | Use per-tenant pools/RLS — Loom policy is not RLS |
-| Complete failure leaves key in-flight until TTL | LOW | Preferable to double side-effect |
-| NetworkGuard DNS | mitigated | Resolves hostnames; any private/link-local answer denied; DNS errors fail closed |
+Metrics are protected by an explicit authorizer or must be deliberately marked
+public. Health endpoints are intentionally separate from authenticated
+operations.
 
-## Serve surfaces
+## Identity responsibilities
 
-```bash
-loom serve --addr=:8080 --grpc-addr=:9090
-# HTTP:  /v1/execute, /mcp, /graphql, /.well-known/loom.json, /v1/openapi.json
-# gRPC:  loom.v1.Runtime/Execute  (MaxRecvMsgSize 1MiB)
-```
+Loom authenticates credentials; it is not an identity provider. Production
+deployments should provide an OIDC/JWKS-backed verifier or another managed
+verifier with:
+
+- issuer and audience validation;
+- bounded key caching and rotation behavior;
+- algorithm and expiry restrictions;
+- explicit subject, service, and tenant claim mapping; and
+- a documented revocation strategy.
+
+The built-in HMAC and static verifiers are for controlled deployments,
+development, and tests. Development demo credentials are generated at startup
+or supplied explicitly through environment configuration. They are not
+production identity.
+
+## Tenancy responsibilities
+
+Configure `tenancy.NewResolver` when a verified tenant claim must match the
+request boundary. For shared PostgreSQL tables, use `RequireTenantContext`,
+`BeginTenant`/`BeginScoped`, RLS, a non-owner role, and `FORCE ROW LEVEL
+SECURITY`. Loom boundary policy is not a substitute for database isolation.
+See [`TENANCY.md`](TENANCY.md) and the [tenant reference](../examples/tenancy/README.md).
 
 ## Production checklist
 
@@ -60,23 +68,30 @@ loom serve --addr=:8080 --grpc-addr=:9090
 export LOOM_ENV=production
 export LOOM_DISABLE_DEMO_PRINCIPALS=true
 export LOOM_REQUIRE_DURABLE=true
-export LOOM_DATABASE_URL='postgres://…'
-export LOOM_JWT_SECRET='…'   # ≥16 bytes, not dev-only*
-# required by durable quota enforcement
-export LOOM_REDIS_URL='redis://…'   # required for durable distributed quota state
-export LOOM_QUOTA_FAIL_CLOSED=true
+export LOOM_DATABASE_URL='postgres://managed-user@db/loom'
+export LOOM_REDIS_URL='redis://managed-redis/0'
+export LOOM_JWT_SECRET="$(openssl rand -hex 32)" # use your secret manager in production
+export LOOM_JWT_ISSUER='https://issuer.example'
+export LOOM_JWT_AUDIENCE='loom-api'
+export LOOM_TENANT_CLAIM=tenant_id # only for tenant-aware deployments
+# Either provide --tls-cert/--tls-key, or explicitly run behind a trusted TLS proxy.
 ```
 
-## Adversarial tests of note
+Also use restricted database roles, RLS for shared tenant tables, statement
+timeouts, connection limits, network egress controls, and an operational audit
+sink. File-backed state is durable for a single node; it is not a distributed
+approval or idempotency store.
 
-- `runtime/hardening_test.go` — concurrent approval consume, burn-before-exec, audit fail-closed
-- `identity/mtls_test.go` — forged fingerprint rejected
-- `adapters/http/wiring_security_test.go` — GraphQL wired + bypass; MCP header wins over body
-- Existing adapter bypass tests (HTTP/MCP/gRPC/Weft)
+## Verification
 
-## How to re-audit
+Run:
 
 ```bash
+go vet ./...
 go test -race ./...
 go test -fuzz=FuzzExecute -fuzztime=15s ./runtime/
 ```
+
+The CI workflow also runs SDK tests and cross-SDK contract tests. Dependency
+and static security scanners should be installed in CI where the runner
+environment permits them.

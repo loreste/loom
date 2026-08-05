@@ -260,7 +260,9 @@ func (a *Adapter) runServe(ctx context.Context, args []string) int {
 		fmt.Fprintln(a.errW(), "WARNING: demo principals enabled (public tokens). Set LOOM_DISABLE_DEMO_PRINCIPALS=true for production.")
 	}
 
+	productionEdge := envCfg.IsProduction()
 	cfg := loomhttp.ServerConfig{Addr: addr, Ready: readyFn}
+	cfg.RequireTLS = productionEdge && !envCfg.TrustedTLSProxy
 	if a.Platform != nil {
 		cfg.Metrics = a.Platform.Metrics
 	}
@@ -286,6 +288,14 @@ func (a *Adapter) runServe(ctx context.Context, args []string) int {
 		}
 		cfg.TLSConfig = tlsCfg
 		cfg.RequireMTLS = requireMTLS
+	}
+	if productionEdge && !envCfg.TrustedTLSProxy && (certFile == "" || keyFile == "") {
+		fmt.Fprintln(a.errW(), "production-like serve requires --tls-cert/--tls-key or LOOM_TRUSTED_TLS_PROXY=true")
+		return 2
+	}
+	if productionEdge && !envCfg.TrustedTLSProxy && grpcAddr != "" && grpcAddr != "-" && grpcAddr != "off" && (tlsCfg == nil || len(tlsCfg.Certificates) == 0) {
+		fmt.Fprintln(a.errW(), "production-like gRPC requires server TLS or LOOM_TRUSTED_TLS_PROXY=true")
+		return 2
 	}
 
 	// Wire agent surfaces when platform components are available.
@@ -395,6 +405,15 @@ func enforceServeSecurity(cfg config.Config) error {
 
 func loadServerTLS(certFile, keyFile, clientCA string, requireMTLS bool) (*tls.Config, error) {
 	cfg := &tls.Config{MinVersion: tls.VersionTLS12}
+	if (certFile == "") != (keyFile == "") {
+		return nil, fmt.Errorf("tls certificate and key must be provided together")
+	}
+	if requireMTLS && clientCA == "" {
+		return nil, fmt.Errorf("client CA is required when mTLS is required")
+	}
+	if clientCA != "" && (certFile == "" || keyFile == "") {
+		return nil, fmt.Errorf("server certificate and key are required when a client CA is configured")
+	}
 	if certFile != "" && keyFile != "" {
 		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 		if err != nil {

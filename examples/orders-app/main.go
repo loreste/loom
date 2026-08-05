@@ -29,6 +29,10 @@ func main() {
 
 func run() error {
 	ctx := context.Background()
+	token := os.Getenv("LOOM_EXAMPLE_TOKEN")
+	if token == "" {
+		return fmt.Errorf("LOOM_EXAMPLE_TOKEN is required for this example")
+	}
 
 	// One-shot: migrate → open pool → register domain → seed least-privilege user.
 	res, err := app.Bootstrap(ctx, app.BootstrapConfig{
@@ -45,7 +49,7 @@ func run() error {
 			return orders.Register(a.Registry, orders.Deps{DBs: a.DBs, Pool: pool})
 		},
 		Users: []app.SeedUser{{
-			ID: "svc:checkout", Token: "checkout-token", Home: "dev",
+			ID: "svc:checkout", Token: token, Home: "dev",
 			Caps: []string{"order.create", "order.read"},
 			Ops: []app.SeedOp{
 				{Op: "order.create", ResType: "order", ResID: "*",
@@ -66,7 +70,7 @@ func run() error {
 	// Create
 	created := a.Call(ctx, core.Request{
 		Operation:   "order.create",
-		Credentials: core.Credentials{Token: "checkout-token"},
+		Credentials: core.Credentials{Token: token},
 		Boundary:    "dev",
 		Resource:    &core.ResourceRef{Type: "order", ID: "*"},
 		Input: map[string]any{
@@ -84,7 +88,7 @@ func run() error {
 	id := created.Output["id"]
 	got := a.Call(ctx, core.Request{
 		Operation:   "order.get",
-		Credentials: core.Credentials{Token: "checkout-token"},
+		Credentials: core.Credentials{Token: token},
 		Boundary:    "dev",
 		Resource:    &core.ResourceRef{Type: "order", ID: fmt.Sprint(id)},
 		Input:       map[string]any{"id": id},
@@ -93,7 +97,7 @@ func run() error {
 
 	listed := a.Call(ctx, core.Request{
 		Operation:   "order.list",
-		Credentials: core.Credentials{Token: "checkout-token"},
+		Credentials: core.Credentials{Token: token},
 		Boundary:    "dev",
 		Resource:    &core.ResourceRef{Type: "order", ID: "*"},
 		Input:       map[string]any{"customer": "acme"},
@@ -104,7 +108,7 @@ func run() error {
 	// enabled db.query, this principal lacks capability.
 	sneak := a.Call(ctx, core.Request{
 		Operation:   "db.query",
-		Credentials: core.Credentials{Token: "checkout-token"},
+		Credentials: core.Credentials{Token: token},
 		Boundary:    "dev",
 		Input:       map[string]any{"pool": "main", "sql": "SELECT * FROM orders"},
 	})

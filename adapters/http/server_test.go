@@ -13,10 +13,11 @@ import (
 	loomhttp "github.com/loreste/loom/adapters/http"
 	"github.com/loreste/loom/bootstrap"
 	"github.com/loreste/loom/core"
+	"github.com/loreste/loom/internal/testtokens"
 )
 
 func TestHealthAndExecute(t *testing.T) {
-	p, err := bootstrap.NewPlatform(bootstrap.Config{})
+	p, err := bootstrap.NewPlatform(bootstrap.Config{DemoTokens: testtokens.Demo()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +94,7 @@ func TestHealthAndExecute(t *testing.T) {
 }
 
 func TestJWTAuthOverHTTP(t *testing.T) {
-	p, err := bootstrap.NewPlatform(bootstrap.Config{})
+	p, err := bootstrap.NewPlatform(bootstrap.Config{DemoTokens: testtokens.Demo()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +114,7 @@ func TestJWTAuthOverHTTP(t *testing.T) {
 }
 
 func TestPaymentFlowHTTP(t *testing.T) {
-	p, err := bootstrap.NewPlatform(bootstrap.Config{})
+	p, err := bootstrap.NewPlatform(bootstrap.Config{DemoTokens: testtokens.Demo()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +162,7 @@ func TestPaymentFlowHTTP(t *testing.T) {
 }
 
 func TestMTLSCredentialsPath(t *testing.T) {
-	p, err := bootstrap.NewPlatform(bootstrap.Config{})
+	p, err := bootstrap.NewPlatform(bootstrap.Config{DemoTokens: testtokens.Demo()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,7 +209,7 @@ func TestMTLSCredentialsPath(t *testing.T) {
 }
 
 func TestSecurityHeaders(t *testing.T) {
-	p, _ := bootstrap.NewPlatform(bootstrap.Config{})
+	p, _ := bootstrap.NewPlatform(bootstrap.Config{DemoTokens: testtokens.Demo()})
 	srv, _ := loomhttp.NewServer(p.Runtime, loomhttp.ServerConfig{})
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/healthz", nil))
@@ -221,7 +222,7 @@ func TestSecurityHeaders(t *testing.T) {
 }
 
 func TestDiscoveryManifest(t *testing.T) {
-	p, err := bootstrap.NewPlatform(bootstrap.Config{})
+	p, err := bootstrap.NewPlatform(bootstrap.Config{DemoTokens: testtokens.Demo()})
 	if err != nil {
 		t.Fatal(err)
 	}

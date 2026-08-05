@@ -17,7 +17,8 @@ use std::collections::HashMap;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let c = Client::new("http://127.0.0.1:8080", "alice-secret-token")?;
+    let token = std::env::var("LOOM_TOKEN")?;
+    let c = Client::new("http://127.0.0.1:8080", &token)?;
     let resp = c
         .call(Call {
             operation: "document.read".into(),

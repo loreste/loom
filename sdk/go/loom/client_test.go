@@ -12,12 +12,13 @@ import (
 	"github.com/loreste/loom/adapters/mcp"
 	"github.com/loreste/loom/bootstrap"
 	"github.com/loreste/loom/core"
+	"github.com/loreste/loom/internal/testtokens"
 	"github.com/loreste/loom/sdk/go/loom"
 )
 
 func testServer(t *testing.T) (*httptest.Server, *bootstrap.Platform) {
 	t.Helper()
-	p, err := bootstrap.NewPlatform(bootstrap.Config{PolicySyncInterval: -1})
+	p, err := bootstrap.NewPlatform(bootstrap.Config{PolicySyncInterval: -1, DemoTokens: testtokens.Demo()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,15 +39,16 @@ func testServer(t *testing.T) (*httptest.Server, *bootstrap.Platform) {
 }
 
 func TestLocalClientCall(t *testing.T) {
-	p, err := bootstrap.NewPlatform(bootstrap.Config{PolicySyncInterval: -1})
+	p, err := bootstrap.NewPlatform(bootstrap.Config{PolicySyncInterval: -1, DemoTokens: testtokens.Demo()})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = p.Close() })
 	c := loom.NewClient(p.Runtime)
+	aliceToken := testtokens.Demo()["user:alice"]
 	resp := c.Call(context.Background(), core.Request{
 		Operation:   "document.read",
-		Credentials: core.Credentials{Token: "alice-secret-token"},
+		Credentials: core.Credentials{Token: aliceToken},
 		Boundary:    "dev",
 		Resource:    &core.ResourceRef{Type: "document", ID: "1"},
 		Input:       map[string]any{"id": "1"},
@@ -61,7 +63,7 @@ func TestLocalClientCall(t *testing.T) {
 
 func TestHTTPClientExecuteAndDenyHint(t *testing.T) {
 	ts, _ := testServer(t)
-	c := loom.NewHTTPClient(ts.URL, "alice-secret-token")
+	c := loom.NewHTTPClient(ts.URL, testtokens.Demo()["user:alice"])
 
 	ok, err := c.Call(context.Background(), core.Request{
 		Operation: "document.read",
@@ -103,7 +105,7 @@ func TestHTTPClientExecuteAndDenyHint(t *testing.T) {
 
 func TestHTTPClientManifestOpenAPI(t *testing.T) {
 	ts, _ := testServer(t)
-	c := loom.NewHTTPClient(ts.URL, "alice-secret-token")
+	c := loom.NewHTTPClient(ts.URL, testtokens.Demo()["user:alice"])
 
 	m, err := c.Manifest(context.Background())
 	if err != nil {
@@ -131,7 +133,7 @@ func TestHTTPClientManifestOpenAPI(t *testing.T) {
 
 func TestHTTPClientMCP(t *testing.T) {
 	ts, _ := testServer(t)
-	c := loom.NewHTTPClient(ts.URL, "alice-secret-token")
+	c := loom.NewHTTPClient(ts.URL, testtokens.Demo()["user:alice"])
 
 	init, err := c.MCP(context.Background(), map[string]any{
 		"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": map[string]any{},

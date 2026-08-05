@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tenancy guidance.
 - Cross-SDK CI and contract tests for Python, TypeScript, and Rust clients.
 - Release packaging for source builds, Docker, and cross-platform binaries.
+- Tenant claim resolution, tenant-bound PostgreSQL transactions, an RLS
+  reference migration, and cross-tenant adversarial tests.
 
 ### Changed
 
@@ -20,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   identity integration.
 - Loom documents its internal two-month usage history and open-source release
   context.
+- Security-sensitive defaults now require verified mTLS peers, explicit metrics
+  access, generated development credentials, and tenant context for configured
+  shared PostgreSQL pools.
 
 ## [0.1.0] — 2026-08-05
 

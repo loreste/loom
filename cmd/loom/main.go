@@ -9,6 +9,7 @@ import (
 	"github.com/loreste/loom/adapters/cli"
 	"github.com/loreste/loom/bootstrap"
 	"github.com/loreste/loom/config"
+	"github.com/loreste/loom/tenancy"
 )
 
 // Filled at link time by scripts/build-release.sh / make build:
@@ -17,7 +18,7 @@ import (
 //
 // Default matches VERSION file when not injected (dev builds).
 var (
-	version = "0.1.0"
+	version = "0.1.1"
 	commit  = "unknown"
 	date    = "unknown"
 )
@@ -44,6 +45,22 @@ func main() {
 		PolicySyncInterval:    env.PolicySyncInterval,
 		RequireDurable:        env.RequireDurable,
 		DisableDemoPrincipals: env.DisableDemoPrincipals,
+		DemoTokens: map[string]string{
+			"user:alice":      os.Getenv("LOOM_DEMO_TOKEN_ALICE"),
+			"user:bob":        os.Getenv("LOOM_DEMO_TOKEN_BOB"),
+			"user:ops":        os.Getenv("LOOM_DEMO_TOKEN_OPS"),
+			"user:approver":   os.Getenv("LOOM_DEMO_TOKEN_APPROVER"),
+			"agent:assistant": os.Getenv("LOOM_DEMO_TOKEN_AGENT"),
+		},
+	}
+	if env.TenantClaim != "" {
+		resolver, err := tenancy.NewResolver("tenant_id")
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "tenancy:", err)
+			os.Exit(2)
+		}
+		bcfg.TenantResolver = resolver
+		bcfg.JWTClaimAttributes = map[string]string{"tenant_id": env.TenantClaim}
 	}
 	if env.JWTSecret != "" {
 		bcfg.JWTSecret = []byte(env.JWTSecret)

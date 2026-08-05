@@ -13,11 +13,24 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"regexp"
 	"sync"
 	"time"
 
 	"github.com/loreste/loom/core"
 )
+
+var tenantSettingPattern = regexp.MustCompile(`^app\.[A-Za-z_][A-Za-z0-9_]*$`)
+
+func validateTenantSetting(setting string) error {
+	if setting == "" {
+		return nil
+	}
+	if !tenantSettingPattern.MatchString(setting) {
+		return fmt.Errorf("db: tenant setting must be an app.* PostgreSQL setting")
+	}
+	return nil
+}
 
 // Options harden a named pool.
 type Options struct {
@@ -32,8 +45,18 @@ type Options struct {
 	// AllowedTables if non-empty, statement must only reference these (simple heuristic).
 	// Empty = no table filter (still subject to SQL class guards).
 	AllowedTables []string
+	// AllowedFunctions limits SQL function calls. Empty uses a small read-only
+	// built-in set; extension and user-defined functions are denied.
+	AllowedFunctions []string
 	// AllowedBoundaries if non-empty, executor only works for these boundaries.
 	AllowedBoundaries []core.BoundaryID
+	// RequireTenantContext disallows direct pooled queries and requires
+	// BeginTenant, which binds the verified boundary to a PostgreSQL transaction
+	// with SET LOCAL semantics.
+	RequireTenantContext bool
+	// TenantSetting is the PostgreSQL custom setting used for RLS. Empty uses
+	// the conventional app.tenant_id setting.
+	TenantSetting string
 	// DriverName for sql.Open (e.g. "pgx", "sqlite").
 	DriverName string
 	// Dialect overrides DetectDialect(DriverName). Zero = detect.
@@ -75,6 +98,16 @@ func (r *Registry) Open(name, driver, dsn string, opts Options) error {
 	if opts.DriverName == "" {
 		opts.DriverName = driver
 	}
+	if opts.TenantSetting == "" {
+		opts.TenantSetting = "app.tenant_id"
+	}
+	if opts.RequireTenantContext {
+		if err := validateTenantSetting(opts.TenantSetting); err != nil {
+			return err
+		}
+	}
+	opts.AllowedTables = append([]string(nil), opts.AllowedTables...)
+	opts.AllowedFunctions = append([]string(nil), opts.AllowedFunctions...)
 	if opts.Dialect == DialectUnknown {
 		opts.Dialect = DetectDialect(opts.DriverName)
 	}
@@ -117,6 +150,16 @@ func (r *Registry) RegisterDB(name string, sqldb *sql.DB, opts Options) error {
 	if opts.MaxArgs <= 0 {
 		opts.MaxArgs = 64
 	}
+	if opts.TenantSetting == "" {
+		opts.TenantSetting = "app.tenant_id"
+	}
+	if opts.RequireTenantContext {
+		if err := validateTenantSetting(opts.TenantSetting); err != nil {
+			return err
+		}
+	}
+	opts.AllowedTables = append([]string(nil), opts.AllowedTables...)
+	opts.AllowedFunctions = append([]string(nil), opts.AllowedFunctions...)
 	if opts.Dialect == DialectUnknown && opts.DriverName != "" {
 		opts.Dialect = DetectDialect(opts.DriverName)
 	}
@@ -196,6 +239,9 @@ func (r *Registry) ExecutorFor(name string, id core.Identity, boundary core.Boun
 	if err != nil {
 		return nil, err
 	}
+	if boundary == "" {
+		return nil, fmt.Errorf("db: tenant boundary is required")
+	}
 	if len(p.opts.AllowedBoundaries) > 0 {
 		ok := false
 		for _, b := range p.opts.AllowedBoundaries {
@@ -216,6 +262,9 @@ func (e *Executor) Query(ctx context.Context, sqlText string, args ...any) (*Res
 	if e == nil || e.pool == nil {
 		return nil, fmt.Errorf("db: nil executor")
 	}
+	if e.pool.opts.RequireTenantContext {
+		return nil, fmt.Errorf("db: tenant context required; use BeginTenant")
+	}
 	if err := validateArgs(len(args), e.pool.opts.MaxArgs); err != nil {
 		return nil, err
 	}
@@ -227,6 +276,9 @@ func (e *Executor) Query(ctx context.Context, sqlText string, args ...any) (*Res
 		return nil, fmt.Errorf("db: query requires a read statement, got %s", class)
 	}
 	if err := checkTables(tables, e.pool.opts.AllowedTables); err != nil {
+		return nil, err
+	}
+	if err := checkFunctions(sqlText, e.pool.opts.AllowedFunctions); err != nil {
 		return nil, err
 	}
 	ctx, cancel := withTimeout(ctx, e.pool.opts.StatementTimeout)
@@ -245,10 +297,37 @@ func (e *Executor) Query(ctx context.Context, sqlText string, args ...any) (*Res
 	return collectRows(rows, e.pool.opts.MaxRows)
 }
 
+// QueryScoped runs a read in a tenant-bound transaction when the pool
+// requires RLS; isolated pools use the normal guarded query path.
+func (e *Executor) QueryScoped(ctx context.Context, sqlText string, args ...any) (*ResultSet, error) {
+	if e == nil || e.pool == nil {
+		return nil, fmt.Errorf("db: nil executor")
+	}
+	if !e.pool.opts.RequireTenantContext {
+		return e.Query(ctx, sqlText, args...)
+	}
+	tx, err := e.BeginTenant(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	rows, err := tx.Query(ctx, sqlText, args...)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
 // Exec runs a write statement after safety checks.
 func (e *Executor) Exec(ctx context.Context, sqlText string, args ...any) (ExecResult, error) {
 	if e == nil || e.pool == nil {
 		return ExecResult{}, fmt.Errorf("db: nil executor")
+	}
+	if e.pool.opts.RequireTenantContext {
+		return ExecResult{}, fmt.Errorf("db: tenant context required; use BeginTenant")
 	}
 	if e.pool.opts.ReadOnly {
 		return ExecResult{}, fmt.Errorf("db: pool %q is read-only", e.pool.Name)
@@ -264,6 +343,9 @@ func (e *Executor) Exec(ctx context.Context, sqlText string, args ...any) (ExecR
 		return ExecResult{}, fmt.Errorf("db: exec requires a write statement, got %s", class)
 	}
 	if err := checkTables(tables, e.pool.opts.AllowedTables); err != nil {
+		return ExecResult{}, err
+	}
+	if err := checkFunctions(sqlText, e.pool.opts.AllowedFunctions); err != nil {
 		return ExecResult{}, err
 	}
 	ctx, cancel := withTimeout(ctx, e.pool.opts.StatementTimeout)

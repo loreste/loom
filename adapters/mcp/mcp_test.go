@@ -7,10 +7,11 @@ import (
 	"github.com/loreste/loom/adapters/mcp"
 	"github.com/loreste/loom/bootstrap"
 	"github.com/loreste/loom/core"
+	"github.com/loreste/loom/internal/testtokens"
 )
 
 func TestMCPDenyByDefaultNoCredentials(t *testing.T) {
-	p, err := bootstrap.NewPlatform(bootstrap.Config{PolicySyncInterval: -1, DisableSeedPolicyPublish: true})
+	p, err := bootstrap.NewPlatform(bootstrap.Config{PolicySyncInterval: -1, DisableSeedPolicyPublish: true, DemoTokens: testtokens.Demo()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +33,7 @@ func TestMCPDenyByDefaultNoCredentials(t *testing.T) {
 }
 
 func TestMCPAllowWithGrantedPrincipal(t *testing.T) {
-	p, err := bootstrap.NewPlatform(bootstrap.Config{PolicySyncInterval: -1, DisableSeedPolicyPublish: true})
+	p, err := bootstrap.NewPlatform(bootstrap.Config{PolicySyncInterval: -1, DisableSeedPolicyPublish: true, DemoTokens: testtokens.Demo()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +56,7 @@ func TestMCPAllowWithGrantedPrincipal(t *testing.T) {
 }
 
 func TestMCPAllowlistFiltering(t *testing.T) {
-	p, err := bootstrap.NewPlatform(bootstrap.Config{PolicySyncInterval: -1, DisableSeedPolicyPublish: true})
+	p, err := bootstrap.NewPlatform(bootstrap.Config{PolicySyncInterval: -1, DisableSeedPolicyPublish: true, DemoTokens: testtokens.Demo()})
 	if err != nil {
 		t.Fatal(err)
 	}

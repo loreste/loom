@@ -1,12 +1,26 @@
--- Replace identifiers and role names with deployment configuration. Do not
--- copy example values into an application without reviewing ownership.
-ALTER TABLE <tenant_table> ENABLE ROW LEVEL SECURITY;
-ALTER TABLE <tenant_table> FORCE ROW LEVEL SECURITY;
+-- Reference PostgreSQL RLS migration for a shared tenant table.
+-- Run as a migration owner, not as the application role.
 
-CREATE POLICY <tenant_policy> ON <tenant_table>
-  USING (tenant_id = current_setting('app.tenant_id', true))
-  WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE TABLE IF NOT EXISTS tenant_orders (
+    id         BIGSERIAL PRIMARY KEY,
+    tenant_id  TEXT NOT NULL,
+    customer   TEXT NOT NULL,
+    sku        TEXT NOT NULL,
+    qty        INTEGER NOT NULL CHECK (qty > 0),
+    status     TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
--- The application role must not own the table and must not have BYPASSRLS.
--- Set app.tenant_id only inside a transaction after Loom resolves the
--- authenticated boundary; reset/rollback it before the connection is reused.
+CREATE INDEX IF NOT EXISTS idx_tenant_orders_tenant_id
+    ON tenant_orders (tenant_id);
+
+ALTER TABLE tenant_orders ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant_orders FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS tenant_orders_isolation ON tenant_orders;
+CREATE POLICY tenant_orders_isolation ON tenant_orders
+    USING (tenant_id = current_setting('app.tenant_id', true))
+    WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+
+-- The application role must not own this table and must not have BYPASSRLS.
+-- Grant only the product-operation privileges required by the application.

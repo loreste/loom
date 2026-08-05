@@ -39,6 +39,8 @@ type JWTConfig struct {
 	ClaimType string
 	// ClaimCapabilities claim name for string array of caps (default "capabilities").
 	ClaimCapabilities string
+	// ClaimAttributes maps trusted JWT claim names to Identity.Attributes keys.
+	ClaimAttributes map[string]string
 	// RequiredCapabilities if non-empty, token must include all (AND).
 	RequiredCapabilities []string
 	// MaxTokenBytes rejects oversized tokens (default 8KiB).
@@ -144,6 +146,16 @@ func (v *JWTVerifier) Authenticate(ctx context.Context, creds core.Credentials) 
 	}
 	if jti, ok := claimString(claims, "jti"); ok {
 		attrs["jti"] = jti
+	}
+	for attribute, claimName := range v.cfg.ClaimAttributes {
+		attribute = strings.TrimSpace(attribute)
+		claimName = strings.TrimSpace(claimName)
+		if attribute == "" || claimName == "" {
+			continue
+		}
+		if value, ok := claimString(claims, claimName); ok {
+			attrs[attribute] = value
+		}
 	}
 
 	return core.Identity{

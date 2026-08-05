@@ -8,6 +8,7 @@ import (
 
 	"github.com/loreste/loom/bootstrap"
 	"github.com/loreste/loom/core"
+	"github.com/loreste/loom/internal/testtokens"
 	"github.com/loreste/loom/policy"
 )
 
@@ -20,6 +21,7 @@ func TestDistributedPolicyFileSync(t *testing.T) {
 		PolicyPath:               path,
 		PolicySyncInterval:       -1,
 		DisableSeedPolicyPublish: false,
+		DemoTokens:               testtokens.Demo(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -31,6 +33,7 @@ func TestDistributedPolicyFileSync(t *testing.T) {
 		PolicyPath:               path,
 		PolicySyncInterval:       -1,
 		DisableSeedPolicyPublish: true,
+		DemoTokens:               testtokens.Demo(),
 	})
 	if err != nil {
 		t.Fatal(err)

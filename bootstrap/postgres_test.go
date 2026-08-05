@@ -9,6 +9,7 @@ import (
 
 	"github.com/loreste/loom/bootstrap"
 	"github.com/loreste/loom/core"
+	"github.com/loreste/loom/internal/testtokens"
 )
 
 func TestPlatformPostgresEndToEnd(t *testing.T) {
@@ -16,7 +17,7 @@ func TestPlatformPostgresEndToEnd(t *testing.T) {
 	if dsn == "" {
 		t.Skip("LOOM_DATABASE_URL not set")
 	}
-	p, err := bootstrap.NewPlatform(bootstrap.Config{DatabaseURL: dsn})
+	p, err := bootstrap.NewPlatform(bootstrap.Config{DatabaseURL: dsn, DemoTokens: testtokens.Demo()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +48,7 @@ func TestPlatformPostgresEndToEnd(t *testing.T) {
 	}
 
 	// New platform instance (simulates other process) shares DB
-	p2, err := bootstrap.NewPlatform(bootstrap.Config{DatabaseURL: dsn})
+	p2, err := bootstrap.NewPlatform(bootstrap.Config{DatabaseURL: dsn, DemoTokens: testtokens.Demo()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +70,7 @@ func TestPlatformPostgresEndToEnd(t *testing.T) {
 	}
 
 	// Replay on yet another instance
-	p3, err := bootstrap.NewPlatform(bootstrap.Config{DatabaseURL: dsn})
+	p3, err := bootstrap.NewPlatform(bootstrap.Config{DatabaseURL: dsn, DemoTokens: testtokens.Demo()})
 	if err != nil {
 		t.Fatal(err)
 	}

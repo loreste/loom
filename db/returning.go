@@ -29,6 +29,9 @@ func (e *Executor) InsertReturning(ctx context.Context, opts InsertOpts) (map[st
 	if e == nil {
 		return nil, fmt.Errorf("db: nil executor")
 	}
+	if e.pool != nil && e.pool.opts.RequireTenantContext {
+		return nil, fmt.Errorf("db: tenant context required; use BeginTenant")
+	}
 	if e.pool != nil && e.pool.Dialect() == DialectSQLite {
 		// last_insert_rowid() is connection-local: pin INSERT + SELECT to one
 		// dedicated connection so they cannot land on different pooled conns.
@@ -158,6 +161,9 @@ func guardedExec(ctx context.Context, pool *Pool, r sqlRunner, sqlText string, a
 	if err := checkTables(tables, pool.opts.AllowedTables); err != nil {
 		return ExecResult{}, err
 	}
+	if err := checkFunctions(sqlText, pool.opts.AllowedFunctions); err != nil {
+		return ExecResult{}, err
+	}
 	ctx, cancel := withTimeout(ctx, pool.opts.StatementTimeout)
 	if cancel != nil {
 		defer cancel()
@@ -187,6 +193,9 @@ func guardedQuery(ctx context.Context, pool *Pool, r sqlRunner, sqlText string, 
 		return nil, fmt.Errorf("db: query requires a read statement, got %s", class)
 	}
 	if err := checkTables(tables, pool.opts.AllowedTables); err != nil {
+		return nil, err
+	}
+	if err := checkFunctions(sqlText, pool.opts.AllowedFunctions); err != nil {
 		return nil, err
 	}
 	ctx, cancel := withTimeout(ctx, pool.opts.StatementTimeout)

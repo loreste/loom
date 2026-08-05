@@ -13,13 +13,14 @@ import (
 	loomgrpc "github.com/loreste/loom/adapters/grpc"
 	loomv1 "github.com/loreste/loom/adapters/grpc/gen/loom/v1"
 	"github.com/loreste/loom/bootstrap"
+	"github.com/loreste/loom/internal/testtokens"
 )
 
 const bufSize = 1 << 20
 
 func startGRPC(t *testing.T) (loomv1.RuntimeClient, func()) {
 	t.Helper()
-	p, err := bootstrap.NewPlatform(bootstrap.Config{PolicySyncInterval: -1})
+	p, err := bootstrap.NewPlatform(bootstrap.Config{PolicySyncInterval: -1, DemoTokens: testtokens.Demo()})
 	if err != nil {
 		t.Fatal(err)
 	}

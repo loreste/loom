@@ -16,7 +16,9 @@ Thin HTTP client for the Loom Universal Runtime. **All authorization happens ser
 ```python
 from loom import Client, ResourceRef
 
-c = Client(base_url="http://127.0.0.1:8080", token="alice-secret-token")
+import os
+
+c = Client(base_url="http://127.0.0.1:8080", token=os.environ["LOOM_TOKEN"])
 resp = c.call(
     "document.read",
     boundary="dev",

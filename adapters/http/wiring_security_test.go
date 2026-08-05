@@ -11,10 +11,11 @@ import (
 	loomhttp "github.com/loreste/loom/adapters/http"
 	"github.com/loreste/loom/adapters/mcp"
 	"github.com/loreste/loom/bootstrap"
+	"github.com/loreste/loom/internal/testtokens"
 )
 
 func TestHTTPGraphQLWiredAndBypassDenied(t *testing.T) {
-	p, err := bootstrap.NewPlatform(bootstrap.Config{PolicySyncInterval: -1})
+	p, err := bootstrap.NewPlatform(bootstrap.Config{PolicySyncInterval: -1, DemoTokens: testtokens.Demo()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +71,7 @@ func TestHTTPGraphQLWiredAndBypassDenied(t *testing.T) {
 }
 
 func TestHTTPMCPHeaderTokenWinsOverBody(t *testing.T) {
-	p, err := bootstrap.NewPlatform(bootstrap.Config{PolicySyncInterval: -1})
+	p, err := bootstrap.NewPlatform(bootstrap.Config{PolicySyncInterval: -1, DemoTokens: testtokens.Demo()})
 	if err != nil {
 		t.Fatal(err)
 	}

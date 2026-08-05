@@ -1,6 +1,6 @@
 // Command worker: long-lived job processor through Loom (no HTTP).
 //
-//	go run ./examples/worker/
+//	LOOM_WORKER_TOKEN="$(openssl rand -hex 24)" go run ./examples/worker/
 //
 // Env (optional):
 //
@@ -42,6 +42,10 @@ func main() {
 func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	token := os.Getenv("LOOM_WORKER_TOKEN")
+	if token == "" {
+		return fmt.Errorf("LOOM_WORKER_TOKEN is required for this example")
+	}
 
 	a, err := app.New(app.Config{})
 	if err != nil {
@@ -97,7 +101,6 @@ func run() error {
 		return err
 	}
 
-	token := "worker-token"
 	if err := a.AddUser("svc:worker", token, "dev", []string{"order.create", "order.read"}); err != nil {
 		return err
 	}

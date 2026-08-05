@@ -10,11 +10,12 @@ import (
 	"github.com/loreste/loom/adapters/mcp"
 	"github.com/loreste/loom/bootstrap"
 	"github.com/loreste/loom/core"
+	"github.com/loreste/loom/internal/testtokens"
 )
 
 func newMCPServer(t *testing.T) *mcp.Server {
 	t.Helper()
-	p, err := bootstrap.NewPlatform(bootstrap.Config{PolicySyncInterval: -1, DisableSeedPolicyPublish: true})
+	p, err := bootstrap.NewPlatform(bootstrap.Config{PolicySyncInterval: -1, DisableSeedPolicyPublish: true, DemoTokens: testtokens.Demo()})
 	if err != nil {
 		t.Fatal(err)
 	}

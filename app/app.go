@@ -54,6 +54,7 @@ type Config struct {
 	BoundaryChecker  boundary.Checker
 	PolicyEngine     policy.Engine
 	ResourceChecker  resource.Checker
+	TenantResolver   runtime.TenantResolver
 }
 
 // App is an in-process Loom application.
@@ -76,6 +77,7 @@ type App struct {
 	PolicyEngine     policy.Engine
 	ResourceChecker  resource.Checker
 	ApprovalEngine   approval.Engine
+	TenantResolver   runtime.TenantResolver
 	QuotaLimiter     quotas.Limiter
 	IdempotencyStore idempotency.Store
 	Metrics          *runtime.Metrics
@@ -95,8 +97,9 @@ func New(cfg Config) (*App, error) {
 	idem := idempotency.NewMemoryStore()
 	memSink := &audit.MemorySink{}
 	var sink audit.Sink = memSink
+	production := isProductionEnvironment(cfg.Environment)
 	if cfg.AuditSink != nil {
-		if cfg.RequireDurableSecurityState || strings.EqualFold(cfg.Environment, "production") {
+		if cfg.RequireDurableSecurityState || production {
 			sink = cfg.AuditSink
 		} else {
 			sink = &audit.MultiSink{Sinks: []audit.Sink{memSink, cfg.AuditSink}}
@@ -130,7 +133,6 @@ func New(cfg Config) (*App, error) {
 	if idempotencyStore == nil {
 		idempotencyStore = idem
 	}
-	production := strings.EqualFold(cfg.Environment, "production")
 	if production {
 		cfg.RequireDurableSecurityState = true
 		if cfg.AllowAnonymous {
@@ -172,6 +174,7 @@ func New(cfg Config) (*App, error) {
 		Idempotency:    idempotencyStore,
 		Audit:          audit.NewLogger(sink),
 		Observer:       metrics,
+		Tenant:         cfg.TenantResolver,
 		AllowAnonymous: cfg.AllowAnonymous,
 	})
 	if err != nil {
@@ -196,12 +199,22 @@ func New(cfg Config) (*App, error) {
 		PolicyEngine:     policyEngine,
 		ResourceChecker:  resourceChecker,
 		ApprovalEngine:   approvalEngine,
+		TenantResolver:   cfg.TenantResolver,
 		QuotaLimiter:     quotaLimiter,
 		IdempotencyStore: idempotencyStore,
 		Metrics:          metrics,
 		client:           loom.NewClient(rt),
 	}
 	return a, nil
+}
+
+func isProductionEnvironment(env string) bool {
+	switch strings.ToLower(strings.TrimSpace(env)) {
+	case "production", "prod", "staging":
+		return true
+	default:
+		return false
+	}
 }
 
 // Close releases DB pools.

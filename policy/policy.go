@@ -128,6 +128,9 @@ func normalizeRule(rule Rule) (Rule, error) {
 	if rule.Operation == "" {
 		return Rule{}, fmt.Errorf("%w: operation required", core.ErrInvalidArgument)
 	}
+	if !rule.Deny && rule.Principal == "" && rule.Boundary == "" && rule.Operation == "*" {
+		return Rule{}, fmt.Errorf("%w: global wildcard allow is not permitted; scope principal or boundary explicitly", core.ErrInvalidArgument)
+	}
 	return copyRule(rule), nil
 }
 

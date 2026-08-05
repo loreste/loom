@@ -10,11 +10,12 @@ import (
 	loomhttp "github.com/loreste/loom/adapters/http"
 	"github.com/loreste/loom/adapters/mcp"
 	"github.com/loreste/loom/bootstrap"
+	"github.com/loreste/loom/internal/testtokens"
 )
 
 func platformHTTP(t *testing.T) (*bootstrap.Platform, http.Handler) {
 	t.Helper()
-	p, err := bootstrap.NewPlatform(bootstrap.Config{PolicySyncInterval: -1})
+	p, err := bootstrap.NewPlatform(bootstrap.Config{PolicySyncInterval: -1, DemoTokens: testtokens.Demo()})
 	if err != nil {
 		t.Fatal(err)
 	}
