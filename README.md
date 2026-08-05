@@ -100,17 +100,16 @@ cannot grant themselves power.
 For anything beyond local demos, set production flags (durable store, no
 demo principals, real JWT secret). See [`docs/SECURITY.md`](docs/SECURITY.md).
 
-## Building the CLI
-
-Cross-compile for Linux, macOS, and Windows (amd64 + arm64):
+## CLI
 
 ```bash
-make build      # this machine → bin/loom
-make release    # all platforms → dist/
+go build -o loom ./cmd/loom
+./loom version
+./loom serve --addr=:8080
 ```
 
-Version comes from the root `VERSION` file (currently **0.1.0**). Tags look
-like `v0.1.0`. Packaging notes: [`docs/BUILD.md`](docs/BUILD.md).
+Version string defaults to the value in `VERSION` (0.1.0) unless you inject
+ldflags yourself.
 
 ## What is in the tree
 

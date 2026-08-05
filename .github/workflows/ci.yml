@@ -31,34 +31,6 @@ jobs:
       - name: Build
         run: go build ./...
 
-  binaries:
-    name: cross-compile
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    needs: test
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-      - name: Cross-compile
-        run: |
-          chmod +x scripts/build-release.sh
-          # Use VERSION file (semver); append short sha for uniqueness on main builds.
-          BASE="$(tr -d '[:space:]' < VERSION)"
-          VERSION="${BASE}+${GITHUB_SHA::7}" ./scripts/build-release.sh
-      - name: Upload binaries
-        uses: actions/upload-artifact@v4
-        with:
-          name: loom-binaries-${{ github.sha }}
-          path: |
-            dist/loom-*
-            dist/SHA256SUMS
-          retention-days: 14
-
   postgres:
     name: postgres-integration
     runs-on: ubuntu-latest

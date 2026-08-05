@@ -1,12 +1,16 @@
-# Binaries / release artifacts
+# Build output (not application source)
 /loom
 /bin/
 /dist/
 *.exe
 *.test
 *.out
+*.o
+*.a
+*.so
+*.dylib
 
-# Local data / demos
+# Local runtime data
 .loom-data/
 *.db
 worker.db
@@ -17,13 +21,14 @@ ordersapp
 .idea/
 .vscode/
 *.swp
+*~
 
-# Coverage / fuzz
+# Coverage / fuzz artifacts
 coverage.out
 coverage.html
 **/testdata/fuzz/
 
-# SDK build artifacts
+# SDK dependency / build trees
 sdk/rust/target/
 sdk/typescript/node_modules/
 sdk/typescript/dist/
@@ -34,7 +39,7 @@ sdk/python/**/__pycache__/
 .env
 .env.*
 
-# Local assistant / IDE agent notes (not part of the application)
+# Assistant / agent tooling and instructions (not the application)
 AGENTS.md
 Claude.md
 CLAUDE.md
@@ -43,3 +48,6 @@ CLAUDE.md
 .cursor/
 .codex/
 .kimi-code/
+.agents/
+**/SKILL.md
+**/.agent/
