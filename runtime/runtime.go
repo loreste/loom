@@ -250,10 +250,10 @@ func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Res
 		}
 	}
 
-	// 11. Approval (only for new executions; replays returned above).
-	// Evaluate checks the token WITHOUT consuming it; the single-use burn
-	// (Consume) happens only after the handler succeeded, so a quota deny,
-	// idempotency conflict, or handler error never burns an approval.
+	// 11. Approval check (only for new executions; replays returned above).
+	// Evaluate validates the token without burning. Atomic Consume happens
+	// immediately before the handler so concurrent callers cannot double-exec
+	// money/write ops, while quota/idempotency denials still leave the token usable.
 	apr := rt.deps.Approval.Evaluate(ctx, id, op, riskLevel, req.Boundary, req.ApprovalToken)
 	if apr.Required && !apr.Approved {
 		return rt.deny(ctx, req, id, op, riskLevel, "approval", core.ReasonApprovalRequired, apr.Message, start, "")
@@ -266,7 +266,7 @@ func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Res
 	}
 	quotaCharged = true
 
-	// Reserve idempotency key after approval so failed approval does not pin the key.
+	// Reserve idempotency key after approval check so failed approval does not pin the key.
 	if req.IdempotencyKey != "" {
 		ttl := idempotency.DefaultTTL
 		if op.Idempotency.TTLSeconds > 0 {
@@ -286,7 +286,16 @@ func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Res
 		}()
 	}
 
-	// 13. Execute
+	// 13. Claim approval immediately before the handler (single-use burn).
+	// Concurrent Consume: exactly one wins. Handler failure still burns the
+	// token (fail closed against double money side-effects).
+	if apr.Required && apr.Approved && req.ApprovalToken != "" {
+		if err := rt.deps.Approval.Consume(ctx, id, op, req.Boundary, req.ApprovalToken); err != nil {
+			return rt.deny(ctx, req, id, op, riskLevel, "approval", core.ReasonApprovalDenied, "approval consume failed: "+err.Error(), start, "")
+		}
+	}
+
+	// 14. Execute
 	handler, err := rt.deps.Registry.Handler(op.Name)
 	if err != nil {
 		return rt.deny(ctx, req, id, op, riskLevel, "execute", core.ReasonHandlerMissing, err.Error(), start, "")
@@ -311,7 +320,7 @@ func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Res
 	result, err := handler(ec)
 	if err != nil {
 		// Execution failed: refund the quota charged above so failing handlers
-		// do not drain quota.
+		// do not drain quota. Approval is already burned (fail closed).
 		if quotaCharged {
 			rt.refundQuota(ctx, id, req.Boundary, op.Name)
 		}
@@ -321,7 +330,7 @@ func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Res
 		result = &core.Result{Output: map[string]any{}}
 	}
 
-	// 13. Filter output (field authz + secrets)
+	// 14. Filter output (field authz + secrets)
 	filtered, err := rt.deps.Fields.Filter(id, req.Boundary, op.Name, req.Fields, op.SensitiveFields, result.Output)
 	if err != nil {
 		// Fail closed: empty output rather than leak
@@ -329,21 +338,18 @@ func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Res
 	}
 	filtered = guardrails.RedactSecrets(filtered)
 
-	// 14. Burn the single-use approval token only now that execution succeeded.
-	// A burn failure fails closed: the handler already ran (documented
-	// fail-closed trade-off) but no output is returned.
-	if apr.Required && apr.Approved && req.ApprovalToken != "" {
-		if err := rt.deps.Approval.Consume(ctx, id, op, req.Boundary, req.ApprovalToken); err != nil {
-			return rt.deny(ctx, req, id, op, riskLevel, "approval", core.ReasonInternal, "approval consume failed: "+err.Error(), start, "")
-		}
-	}
-
 	// 15. Audit allow. Fail closed: an emit error converts the allow into a
 	// deny (ReasonInternal, no output; the handler's side effects already
-	// happened — that is the documented fail-closed trade-off).
+	// happened — that is the documented fail-closed trade-off). Approval is
+	// already burned so a retry cannot double-execute.
 	auditID, aerr := rt.audit(ctx, req, id, op, riskLevel, core.DecisionAllow, "execute", "allow", "execution succeeded", start, "")
 	if aerr != nil {
 		log.Printf("loom: audit emit failed on allow path (failing closed): %v", aerr)
+		// Do not Abort idempotency after successful handler — prevents a second side effect.
+		if idemBegin {
+			// Best-effort: leave key in-flight so parallel retries conflict.
+			idemBegin = false
+		}
 		return rt.deny(ctx, req, id, op, riskLevel, "audit", core.ReasonInternal, "audit emit failed: "+aerr.Error(), start, "")
 	}
 
@@ -356,18 +362,21 @@ func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Res
 		Risk:     riskLevel,
 	}
 
-	// Complete idempotency
+	// Complete idempotency. On failure: log loudly, do NOT Abort (would enable
+	// a second side-effect after TTL). Client still receives allow.
 	if idemBegin {
 		ttl := idempotency.DefaultTTL
 		if op.Idempotency.TTLSeconds > 0 {
 			ttl = time.Duration(op.Idempotency.TTLSeconds) * time.Second
 		}
-		_ = rt.deps.Idempotency.Complete(ctx, idemKey, &idempotency.Stored{
+		if err := rt.deps.Idempotency.Complete(ctx, idemKey, &idempotency.Stored{
 			Fingerprint: idemFP,
 			Response:    resp,
 			StoredAt:    rt.deps.Clock(),
 			ExpiresAt:   rt.deps.Clock().Add(ttl),
-		})
+		}); err != nil {
+			log.Printf("loom: CRITICAL idempotency complete failed (key held in-flight): %v", err)
+		}
 		idemBegin = false
 	}
 	return resp

@@ -24,18 +24,20 @@ type Decision struct {
 
 // Engine decides if approval is needed and whether the request satisfies it.
 //
-// Evaluate only CHECKS the token — it must never consume it. Single-use burn
-// happens in Consume, which the runtime calls only after the handler succeeded,
-// so a quota deny / idempotency conflict / handler error never burns an approval.
+// Evaluate only CHECKS the token — it must never consume it.
+// Consume burns a single-use token. The runtime claims (Consume) BEFORE the
+// handler so concurrent requests cannot double-execute money/write ops.
+// Trade-off: a handler failure after Consume still burns the token (fail closed).
 type Engine interface {
 	// Evaluate checks requirement and token validity without consuming.
 	// The stored record boundary must match the request boundary exactly
 	// (fail closed: a token issued for "dev" is invalid in "prod"; a stored
 	// empty boundary only matches an empty request boundary).
 	Evaluate(ctx context.Context, id core.Identity, op *core.Operation, risk core.RiskLevel, boundary core.BoundaryID, token string) Decision
-	// Consume burns a single-use token after successful execution.
+	// Consume burns a single-use token (atomic claim).
 	// It re-checks principal/operation/boundary/expiry atomically.
 	// An error means the token was NOT consumed (fail closed).
+	// Concurrent Consume of the same token: exactly one succeeds.
 	Consume(ctx context.Context, id core.Identity, op *core.Operation, boundary core.BoundaryID, token string) error
 }
 
@@ -86,6 +88,13 @@ func (e *MemoryEngine) Issue(token string, principal core.PrincipalID, op string
 	h := hashTok(token)
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	// Never resurrect a burned or existing token string (fail closed).
+	if prev, ok := e.tokens[h]; ok {
+		if prev.Consumed {
+			return fmt.Errorf("%w: approval token already used; issue a new token", core.ErrAlreadyExists)
+		}
+		return fmt.Errorf("%w: approval token already issued", core.ErrAlreadyExists)
+	}
 	e.tokens[h] = &Record{
 		TokenHash: h,
 		Principal: principal,

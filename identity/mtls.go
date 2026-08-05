@@ -86,6 +86,10 @@ func (v *MTLSVerifier) Register(p CertPrincipal) error {
 	return nil
 }
 
+// ClaimPeerVerified is set only by adapters that extracted a real TLS peer cert
+// (HTTP mTLS). Callers cannot forge mTLS by supplying scheme=mtls + fingerprint.
+const ClaimPeerVerified = "peer_verified"
+
 // Authenticate implements Verifier.
 func (v *MTLSVerifier) Authenticate(ctx context.Context, creds core.Credentials) (core.Identity, error) {
 	if err := ctx.Err(); err != nil {
@@ -96,6 +100,11 @@ func (v *MTLSVerifier) Authenticate(ctx context.Context, creds core.Credentials)
 	}
 	if strings.ToLower(creds.Scheme) != "mtls" {
 		return core.Identity{}, fmt.Errorf("identity: not mtls scheme")
+	}
+	// Fail closed: fingerprint knowledge alone is not proof of possession.
+	// Only CredentialsFromCertificate (or equivalent TLS adapter) sets this claim.
+	if creds.Claims == nil || creds.Claims[ClaimPeerVerified] != "1" {
+		return core.Identity{}, fmt.Errorf("identity: mtls requires verified peer certificate")
 	}
 
 	fp := strings.ToLower(strings.TrimSpace(creds.Token))
@@ -171,11 +180,14 @@ func SPIFFEID(cert *x509.Certificate) string {
 }
 
 // CredentialsFromCertificate builds mtls credentials from a leaf cert.
+// Sets ClaimPeerVerified so the verifier accepts only TLS-proven peers.
 func CredentialsFromCertificate(cert *x509.Certificate) core.Credentials {
 	if cert == nil {
 		return core.Credentials{Scheme: "mtls"}
 	}
-	claims := map[string]string{}
+	claims := map[string]string{
+		ClaimPeerVerified: "1",
+	}
 	if id := SPIFFEID(cert); id != "" {
 		claims["spiffe_id"] = id
 	}

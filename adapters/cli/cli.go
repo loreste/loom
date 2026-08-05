@@ -191,9 +191,13 @@ func (a *Adapter) runServe(ctx context.Context, args []string) int {
 	// Rebuild platform with durable backends when factory available.
 	rt := a.RT
 	var readyFn func(context.Context) error
+	envCfg := config.Load()
+	if err := enforceServeSecurity(envCfg); err != nil {
+		fmt.Fprintln(a.errW(), "security:", err)
+		return 2
+	}
 	if a.PlatformFactory != nil && (dataDir != "" || dbURL != "" || redisURL != "") {
 		fc := true
-		envCfg := config.Load()
 		p, err := a.PlatformFactory(bootstrap.Config{
 			DataDir:          dataDir,
 			DatabaseURL:      dbURL,
@@ -222,6 +226,9 @@ func (a *Adapter) runServe(ctx context.Context, args []string) int {
 		return 2
 	} else if a.Platform != nil {
 		readyFn = a.Platform.Ready
+	}
+	if !envCfg.DisableDemoPrincipals {
+		fmt.Fprintln(a.errW(), "WARNING: demo principals enabled (public tokens). Set LOOM_DISABLE_DEMO_PRINCIPALS=true for production.")
 	}
 
 	cfg := loomhttp.ServerConfig{Addr: addr, Ready: readyFn}
@@ -269,6 +276,9 @@ func (a *Adapter) runServe(ctx context.Context, args []string) int {
 	if cfg.MCP != nil {
 		extra += " POST /mcp"
 	}
+	if cfg.EnableGraphQL {
+		extra += " POST /graphql"
+	}
 	if cfg.Registry != nil {
 		extra += " GET /v1/openapi.json"
 	}
@@ -303,6 +313,11 @@ func (a *Adapter) runServe(ctx context.Context, args []string) int {
 		}
 		return 0
 	}
+}
+
+// enforceServeSecurity applies production hardening from env config.
+func enforceServeSecurity(cfg config.Config) error {
+	return cfg.Validate()
 }
 
 func loadServerTLS(certFile, keyFile, clientCA string, requireMTLS bool) (*tls.Config, error) {

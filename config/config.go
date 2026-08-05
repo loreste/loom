@@ -37,6 +37,10 @@ type Config struct {
 	// DisableDemoPrincipals skips seeding the publicly-known demo bearer tokens
 	// (required together with RequireDurable by bootstrap).
 	DisableDemoPrincipals bool
+	// Env is LOOM_ENV (development|production). Production hardens defaults.
+	Env string
+	// AllowDemo explicitly permits demo principals outside development.
+	AllowDemo bool
 	// PolicyPath file for distributed policy JSON.
 	PolicyPath string
 	// PolicySyncInterval e.g. 5s; empty = 5s default in bootstrap.
@@ -46,23 +50,35 @@ type Config struct {
 // Load reads LOOM_* environment variables with safe defaults.
 func Load() Config {
 	c := Config{
-		Addr:               env("LOOM_ADDR", ":8080"),
-		DataDir:            os.Getenv("LOOM_DATA_DIR"),
-		DatabaseURL:        os.Getenv("LOOM_DATABASE_URL"),
-		RedisURL:           os.Getenv("LOOM_REDIS_URL"),
-		JWTSecret:          os.Getenv("LOOM_JWT_SECRET"),
-		JWTIssuer:          env("LOOM_JWT_ISSUER", "loom"),
-		JWTAudience:        env("LOOM_JWT_AUDIENCE", "loom-api"),
-		AuditJSONL:         os.Getenv("LOOM_AUDIT_JSONL"),
-		PGMaxOpenConns:     envInt("LOOM_PG_MAX_OPEN", 20),
-		PGMaxIdleConns:     envInt("LOOM_PG_MAX_IDLE", 5),
-		FailClosedQuotas:   envBool("LOOM_QUOTA_FAIL_CLOSED", true),
-		RequireDurable:     envBool("LOOM_REQUIRE_DURABLE", false),
+		Addr:                  env("LOOM_ADDR", ":8080"),
+		DataDir:               os.Getenv("LOOM_DATA_DIR"),
+		DatabaseURL:           os.Getenv("LOOM_DATABASE_URL"),
+		RedisURL:              os.Getenv("LOOM_REDIS_URL"),
+		JWTSecret:             os.Getenv("LOOM_JWT_SECRET"),
+		JWTIssuer:             env("LOOM_JWT_ISSUER", "loom"),
+		JWTAudience:           env("LOOM_JWT_AUDIENCE", "loom-api"),
+		AuditJSONL:            os.Getenv("LOOM_AUDIT_JSONL"),
+		PGMaxOpenConns:        envInt("LOOM_PG_MAX_OPEN", 20),
+		PGMaxIdleConns:        envInt("LOOM_PG_MAX_IDLE", 5),
+		FailClosedQuotas:      envBool("LOOM_QUOTA_FAIL_CLOSED", true),
+		RequireDurable:        envBool("LOOM_REQUIRE_DURABLE", false),
 		DisableDemoPrincipals: envBool("LOOM_DISABLE_DEMO_PRINCIPALS", false),
-		PolicyPath:         os.Getenv("LOOM_POLICY_PATH"),
-		PolicySyncInterval: ParseDurationEnv("LOOM_POLICY_SYNC_INTERVAL", 5*time.Second),
+		Env:                   strings.ToLower(env("LOOM_ENV", "development")),
+		AllowDemo:             envBool("LOOM_ALLOW_DEMO", false),
+		PolicyPath:            os.Getenv("LOOM_POLICY_PATH"),
+		PolicySyncInterval:    ParseDurationEnv("LOOM_POLICY_SYNC_INTERVAL", 5*time.Second),
 	}
 	return c
+}
+
+// IsProduction reports whether Env is a production-like profile.
+func (c Config) IsProduction() bool {
+	switch c.Env {
+	case "production", "prod", "staging":
+		return true
+	default:
+		return false
+	}
 }
 
 // Validate checks adversarial production constraints.
@@ -77,6 +93,17 @@ func (c Config) Validate() error {
 	}
 	if strings.HasPrefix(c.JWTSecret, "dev-only") {
 		return fmt.Errorf("refusing dev JWT secret when explicitly set as LOOM_JWT_SECRET value starting with dev-only")
+	}
+	if c.IsProduction() {
+		if !c.DisableDemoPrincipals && !c.AllowDemo {
+			return fmt.Errorf("LOOM_ENV=%s requires LOOM_DISABLE_DEMO_PRINCIPALS=true (or LOOM_ALLOW_DEMO=true for explicit demo)", c.Env)
+		}
+		if c.JWTSecret == "" {
+			return fmt.Errorf("LOOM_ENV=%s requires LOOM_JWT_SECRET (min 16 bytes)", c.Env)
+		}
+		if !c.RequireDurable {
+			return fmt.Errorf("LOOM_ENV=%s requires LOOM_REQUIRE_DURABLE=true with LOOM_DATABASE_URL or LOOM_DATA_DIR", c.Env)
+		}
 	}
 	return nil
 }

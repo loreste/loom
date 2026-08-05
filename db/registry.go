@@ -313,6 +313,11 @@ func checkTables(used, allowed []string) error {
 	if len(allowed) == 0 {
 		return nil
 	}
+	// Fail closed: an allowlist with zero extracted tables (e.g. SELECT pg_ls_dir(...))
+	// must not pass — table-less statements can still be dangerous.
+	if len(used) == 0 {
+		return fmt.Errorf("db: statement references no allowlisted tables")
+	}
 	set := make(map[string]struct{}, len(allowed))
 	for _, t := range allowed {
 		set[normalizeIdent(t)] = struct{}{}

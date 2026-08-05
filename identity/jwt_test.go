@@ -188,13 +188,23 @@ func TestMTLSFingerprint(t *testing.T) {
 	id, err := v.Authenticate(context.Background(), core.Credentials{
 		Scheme: "mtls",
 		Token:  fp,
+		Claims: map[string]string{identity.ClaimPeerVerified: "1"},
 	})
 	if err != nil || id.ID != "svc:payments" {
 		t.Fatalf("%v %+v", err, id)
 	}
+	// Fingerprint alone (no peer_verified) must fail.
+	_, err = v.Authenticate(context.Background(), core.Credentials{
+		Scheme: "mtls",
+		Token:  fp,
+	})
+	if err == nil {
+		t.Fatal("mtls without peer_verified must fail")
+	}
 	_, err = v.Authenticate(context.Background(), core.Credentials{
 		Scheme: "mtls",
 		Token:  "deadbeef",
+		Claims: map[string]string{identity.ClaimPeerVerified: "1"},
 	})
 	if err == nil {
 		t.Fatal("unknown cert must fail")

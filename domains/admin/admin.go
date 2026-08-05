@@ -77,15 +77,16 @@ func Register(reg *core.Registry, deps Deps) error {
 		if deps.Registry == nil {
 			return nil, fmt.Errorf("registry not configured")
 		}
-		names := deps.Registry.Names()
-		// sort for stability
-		out := make([]any, len(names))
-		for i, n := range names {
-			out[i] = n
+		// Capability-filtered names only (same visibility as catalog.spec).
+		// Prevents enumerating ops the caller could never invoke.
+		specs := catalog.Build(deps.Registry, catalog.ForCapabilities(ec.Identity.Capabilities))
+		out := make([]any, 0, len(specs))
+		for _, sp := range specs {
+			out = append(out, sp.Name)
 		}
 		return &core.Result{Output: map[string]any{
 			"operations": out,
-			"count":      len(names),
+			"count":      len(out),
 		}}, nil
 	}); err != nil {
 		return err

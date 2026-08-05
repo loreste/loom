@@ -40,23 +40,24 @@ func (s *ApprovalStore) Issue(token string, principal core.PrincipalID, op strin
 	}
 	h := hashTok(token)
 	exp := time.Now().UTC().Add(ttl)
-	_, err := s.db.Exec(`
+	// Never resurrect consumed tokens or overwrite an existing issuance.
+	res, err := s.db.Exec(`
 		INSERT INTO loom_approvals (token_hash, principal, operation, boundary, max_risk, expires_at, consumed, single_use)
 		VALUES ($1, $2, $3, $4, $5, $6, FALSE, TRUE)
-		ON CONFLICT (token_hash) DO UPDATE SET
-			principal = EXCLUDED.principal,
-			operation = EXCLUDED.operation,
-			boundary = EXCLUDED.boundary,
-			max_risk = EXCLUDED.max_risk,
-			expires_at = EXCLUDED.expires_at,
-			consumed = FALSE,
-			single_use = TRUE
+		ON CONFLICT (token_hash) DO NOTHING
 	`, h, string(principal), op, string(boundary), int(maxRisk), exp)
-	return err
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n != 1 {
+		return fmt.Errorf("%w: approval token already issued or used", core.ErrAlreadyExists)
+	}
+	return nil
 }
 
-// Evaluate implements approval.Engine. It checks the token WITHOUT consuming it;
-// the runtime calls Consume only after the handler succeeded. The stored boundary
+// Evaluate implements approval.Engine. It checks the token WITHOUT consuming it.
+// The runtime claims via Consume before the handler. The stored boundary
 // must match the request boundary exactly (fail closed).
 func (s *ApprovalStore) Evaluate(ctx context.Context, id core.Identity, op *core.Operation, risk core.RiskLevel, boundary core.BoundaryID, token string) approval.Decision {
 	if op == nil {

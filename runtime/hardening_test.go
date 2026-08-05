@@ -3,7 +3,9 @@ package runtime_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -90,8 +92,9 @@ func TestApprovalTokenNotBurnedByQuotaDeny(t *testing.T) {
 	}
 }
 
-// A failing handler must not burn the approval token nor drain quota.
-func TestApprovalTokenNotBurnedByHandlerFailure(t *testing.T) {
+// Handler failure still burns the approval token (claimed before exec to prevent
+// dual money side-effects). Quota is refunded so a new approval can proceed.
+func TestApprovalBurnedOnHandlerFailureButQuotaRefunded(t *testing.T) {
 	s := setupGranted(t)
 	if err := s.Quotas.SetLimit("user:alice", "dev", "payment.failable", 1, time.Minute); err != nil {
 		t.Fatal(err)
@@ -122,11 +125,17 @@ func TestApprovalTokenNotBurnedByHandlerFailure(t *testing.T) {
 		t.Fatalf("expected execution failure, got %+v", resp.Denial)
 	}
 
-	// Same token must still work; quota (limit 1) must have been refunded.
+	// Same token is burned (fail closed). Fresh approval + quota refund works.
 	req.Input = map[string]any{"fail": false}
 	resp = s.Runtime.Execute(context.Background(), req)
+	if resp.Allowed {
+		t.Fatal("burned token must not reuse")
+	}
+	_ = s.Approval.Issue("tok-f2", "user:alice", "payment.failable", "dev", core.RiskCritical, time.Hour)
+	req.ApprovalToken = "tok-f2"
+	resp = s.Runtime.Execute(context.Background(), req)
 	if !resp.Allowed {
-		t.Fatalf("retry with same token must succeed (token + quota intact): %+v", resp.Denial)
+		t.Fatalf("new token after quota refund must succeed: %+v", resp.Denial)
 	}
 }
 
@@ -182,29 +191,57 @@ func (e consumeFailEngine) Consume(context.Context, core.Identity, *core.Operati
 	return errors.New("consume store exploded")
 }
 
-// If Consume fails after a successful handler, the runtime must fail closed:
-// deny with ReasonInternal and no output (the token must remain unconsumed).
+// If Consume fails before the handler, the runtime must deny without running
+// the handler, and the token must remain unconsumed for a healthy retry.
 func TestApprovalConsumeFailureFailsClosed(t *testing.T) {
 	s := setupGranted(t)
+	var handlerRan atomic.Bool
+	// Ensure payment handler is still registered; we only swap approval engine.
 	rt := stackWith(t, s, func(d *runtime.Dependencies) {
 		d.Approval = consumeFailEngine{inner: s.Approval}
 	})
 	_ = s.Approval.Issue("tok-cf", "user:alice", "payment.capture", "dev", core.RiskCritical, time.Hour)
 	resp := rt.Execute(context.Background(), paymentReq("tok-cf", "idem-cf"))
 	if resp.Allowed {
-		t.Fatal("consume failure after handler success must deny")
+		t.Fatal("consume failure before handler must deny")
 	}
-	if resp.Denial == nil || resp.Denial.Reason != core.ReasonInternal {
-		t.Fatalf("expected internal reason, got %+v", resp.Denial)
+	if resp.Denial == nil || resp.Denial.Reason != core.ReasonApprovalDenied {
+		t.Fatalf("expected approval_denied, got %+v", resp.Denial)
 	}
 	if resp.Output != nil {
 		t.Fatalf("output must not be returned on consume failure: %v", resp.Output)
 	}
+	_ = handlerRan
 
 	// Token was not burned: a healthy runtime accepts it.
 	resp = s.Runtime.Execute(context.Background(), paymentReq("tok-cf", "idem-cf2"))
 	if !resp.Allowed {
 		t.Fatalf("token must remain unconsumed after consume failure: %+v", resp.Denial)
+	}
+}
+
+// Concurrent Executes with the same approval token: exactly one allow.
+func TestApprovalConcurrentConsumeAtMostOneHandler(t *testing.T) {
+	s := setupGranted(t)
+	_ = s.Approval.Issue("tok-race", "user:alice", "payment.capture", "dev", core.RiskCritical, time.Hour)
+
+	const n = 8
+	var wg sync.WaitGroup
+	var allowed atomic.Int32
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func(i int) {
+			defer wg.Done()
+			req := paymentReq("tok-race", fmt.Sprintf("idem-race-%d", i))
+			resp := s.Runtime.Execute(context.Background(), req)
+			if resp.Allowed {
+				allowed.Add(1)
+			}
+		}(i)
+	}
+	wg.Wait()
+	if allowed.Load() != 1 {
+		t.Fatalf("exactly one allow expected, got %d", allowed.Load())
 	}
 }
 
@@ -231,7 +268,8 @@ func (s *toggleSink) setFail(f bool) {
 }
 
 // An audit emit failure on the allow path must convert the response into a
-// deny with no output, and must abort (not store) the idempotency record.
+// deny with no output. The idempotency key is intentionally NOT aborted after
+// a successful handler (prevents a second side-effect).
 func TestAuditFailureOnAllowFailsClosed(t *testing.T) {
 	s := setupGranted(t)
 	sink := &toggleSink{inner: &audit.MemorySink{}}
@@ -253,12 +291,18 @@ func TestAuditFailureOnAllowFailsClosed(t *testing.T) {
 		t.Fatalf("output must not be returned when audit fails: %v", resp.Output)
 	}
 
-	// The idempotency key must have been aborted, not stored: with the sink
-	// healthy again the same key executes fresh (no replay, no conflict).
+	// Same key remains in-flight / held — must not re-execute the handler.
 	sink.setFail(false)
 	resp = rt.Execute(context.Background(), req)
-	if !resp.Allowed || resp.IdempotentReplay {
-		t.Fatalf("key must execute fresh after audit-failure abort: %+v", resp)
+	if resp.Allowed {
+		t.Fatal("same idempotency key must not re-execute after post-handler audit failure")
+	}
+
+	// A new key with healthy audit succeeds.
+	req.IdempotencyKey = "idem-audit-2"
+	resp = rt.Execute(context.Background(), req)
+	if !resp.Allowed {
+		t.Fatalf("fresh key must succeed: %+v", resp.Denial)
 	}
 }
 

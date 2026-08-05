@@ -96,6 +96,12 @@ func (e *FileEngine) Issue(token string, principal core.PrincipalID, op string, 
 	h := hashTok(token)
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if prev, ok := e.tokens[h]; ok {
+		if prev.Consumed {
+			return fmt.Errorf("%w: approval token already used; issue a new token", core.ErrAlreadyExists)
+		}
+		return fmt.Errorf("%w: approval token already issued", core.ErrAlreadyExists)
+	}
 	e.tokens[h] = &Record{
 		TokenHash: h,
 		Principal: principal,

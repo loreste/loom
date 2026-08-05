@@ -43,6 +43,11 @@ Quotas: `RedisURL` → memory. Redis errors **fail closed** by default.
 Postgres package: `store/postgres`. Never store raw approval tokens (hash only).  
 Quotas package: shared `quotas.Config`; Redis uses atomic Lua INCR + rollback on exceed.
 
+Approval: `Evaluate` checks; `Consume` claims **before** the handler (single-use burn).  
+mTLS: only `CredentialsFromCertificate` (TLS peer) authenticates — fingerprint alone is not enough.  
+Production: `LOOM_ENV=production` requires durable stores, no demo principals, real JWT secret.  
+Security notes: [`docs/SECURITY.md`](docs/SECURITY.md).
+
 ## Testing
 
 ```bash

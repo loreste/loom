@@ -128,7 +128,8 @@ func (s *IdempotencyStore) Begin(ctx context.Context, key, fingerprint string, t
 		FROM loom_idempotency WHERE key = $1 FOR UPDATE
 	`, key).Scan(&fp, &respRaw, &inFlight, &expires)
 
-	if err == nil && time.Now().Before(expires) {
+	switch {
+	case err == nil && time.Now().Before(expires):
 		if fp != fingerprint {
 			return fmt.Errorf("%w: idempotency key conflict", core.ErrAlreadyExists)
 		}
@@ -138,25 +139,47 @@ func (s *IdempotencyStore) Begin(ctx context.Context, key, fingerprint string, t
 		if inFlight {
 			return fmt.Errorf("%w: in flight", core.ErrAlreadyExists)
 		}
-	}
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		// Expired-or-open row held under FOR UPDATE — claim it.
+		_, err = tx.ExecContext(ctx, `
+			UPDATE loom_idempotency
+			SET fingerprint = $2, response = NULL, in_flight = TRUE,
+			    expires_at = $3, updated_at = NOW()
+			WHERE key = $1
+		`, key, fingerprint, exp)
+		if err != nil {
+			return err
+		}
+		return tx.Commit()
+	case err == nil:
+		// Row exists but expired — reclaim under the same lock.
+		_, err = tx.ExecContext(ctx, `
+			UPDATE loom_idempotency
+			SET fingerprint = $2, response = NULL, in_flight = TRUE,
+			    expires_at = $3, updated_at = NOW()
+			WHERE key = $1
+		`, key, fingerprint, exp)
+		if err != nil {
+			return err
+		}
+		return tx.Commit()
+	case errors.Is(err, sql.ErrNoRows):
+		// Insert-only claim. ON CONFLICT DO NOTHING so a concurrent insert loses cleanly.
+		res, ierr := tx.ExecContext(ctx, `
+			INSERT INTO loom_idempotency (key, fingerprint, response, in_flight, expires_at, updated_at)
+			VALUES ($1, $2, NULL, TRUE, $3, NOW())
+			ON CONFLICT (key) DO NOTHING
+		`, key, fingerprint, exp)
+		if ierr != nil {
+			return ierr
+		}
+		n, _ := res.RowsAffected()
+		if n != 1 {
+			return fmt.Errorf("%w: in flight", core.ErrAlreadyExists)
+		}
+		return tx.Commit()
+	default:
 		return err
 	}
-
-	_, err = tx.ExecContext(ctx, `
-		INSERT INTO loom_idempotency (key, fingerprint, response, in_flight, expires_at, updated_at)
-		VALUES ($1, $2, NULL, TRUE, $3, NOW())
-		ON CONFLICT (key) DO UPDATE SET
-			fingerprint = EXCLUDED.fingerprint,
-			response = NULL,
-			in_flight = TRUE,
-			expires_at = EXCLUDED.expires_at,
-			updated_at = NOW()
-	`, key, fingerprint, exp)
-	if err != nil {
-		return err
-	}
-	return tx.Commit()
 }
 
 // Complete finalizes an in-flight key.

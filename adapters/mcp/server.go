@@ -41,6 +41,9 @@ type Server struct {
 	Verifier identity.Verifier
 	// Token default bearer (e.g. from LOOM_TOKEN). Used when the call omits one.
 	Token string
+	// tokenLocked means Token came from the transport (HTTP Authorization) and
+	// must not be overridden by JSON-RPC body bearer fields.
+	tokenLocked bool
 	// Boundary default boundary when the call omits one.
 	Boundary string
 	// MaxMessageBytes caps a single JSON-RPC frame (default 1 MiB).
@@ -161,16 +164,15 @@ type toolsListParams struct {
 }
 
 func (s *Server) handleToolsList(ctx context.Context, params json.RawMessage) (any, *rpcError) {
-	token := s.Token
+	var bodyTok, metaAuth string
 	if len(params) > 0 {
 		var p toolsListParams
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, &rpcError{Code: rpcInvalidParams, Message: "invalid params"}
 		}
-		if t := bearerFrom(p.BearerToken, p.Meta.Authorization); t != "" {
-			token = t
-		}
+		bodyTok, metaAuth = p.BearerToken, p.Meta.Authorization
 	}
+	token := s.resolveToken(bodyTok, metaAuth)
 	// Fail closed: no token or no verifier → empty tool list (no schema leak).
 	if token == "" || s.Verifier == nil || s.Registry == nil {
 		return map[string]any{"tools": []any{}}, nil
@@ -214,8 +216,9 @@ type toolsCallParams struct {
 	} `json:"_meta,omitempty"`
 }
 
-// HandleWithToken is Handle with a per-request bearer override (HTTP Authorization).
-// Empty token leaves Server.Token / params as the source of truth.
+// HandleWithToken is Handle with a per-request bearer from the transport
+// (HTTP Authorization). When token is non-empty it wins over JSON-RPC body
+// bearer fields (fail closed against proxy/WAF confusion).
 func (s *Server) HandleWithToken(ctx context.Context, raw []byte, token string) ([]byte, error) {
 	if s == nil {
 		return marshalResp(nil, nil, &rpcError{Code: rpcInternalError, Message: "mcp server not configured"})
@@ -226,7 +229,22 @@ func (s *Server) HandleWithToken(ctx context.Context, raw []byte, token string) 
 	// Shallow copy so concurrent HTTP requests do not race on Server.Token.
 	cp := *s
 	cp.Token = token
+	cp.tokenLocked = true
 	return cp.Handle(ctx, raw)
+}
+
+func (s *Server) resolveToken(bodyToken, metaAuth string) string {
+	// Transport-locked token always wins.
+	if s != nil && s.tokenLocked && s.Token != "" {
+		return s.Token
+	}
+	if t := bearerFrom(bodyToken, metaAuth); t != "" {
+		return t
+	}
+	if s != nil {
+		return s.Token
+	}
+	return ""
 }
 
 func (s *Server) handleToolsCall(ctx context.Context, params json.RawMessage) (any, *rpcError) {
@@ -240,10 +258,7 @@ func (s *Server) handleToolsCall(ctx context.Context, params json.RawMessage) (a
 	if p.Name == "" {
 		return nil, &rpcError{Code: rpcInvalidParams, Message: "name required"}
 	}
-	token := s.Token
-	if t := bearerFrom(p.BearerToken, p.Meta.Authorization); t != "" {
-		token = t
-	}
+	token := s.resolveToken(p.BearerToken, p.Meta.Authorization)
 	boundary := p.Boundary
 	if boundary == "" {
 		boundary = s.Boundary

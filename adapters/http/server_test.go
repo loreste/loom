@@ -168,11 +168,13 @@ func TestMTLSCredentialsPath(t *testing.T) {
 	// Direct runtime path with mtls scheme (HTTP layer needs real TLS for cert extract;
 	// verify multi verifier accepts mtls credentials).
 	_ = p.IssueApproval("appr-mtls", "svc:payments", "payment.capture", "dev", core.RiskCritical, time.Hour)
+	// Peer-verified claim is required (set by CredentialsFromCertificate on real TLS).
 	resp := p.Runtime.Execute(context.Background(), core.Request{
 		Operation: "payment.capture",
 		Credentials: core.Credentials{
 			Scheme: "mtls",
 			Token:  "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff",
+			Claims: map[string]string{"peer_verified": "1"},
 		},
 		Boundary: "dev",
 		Resource: &core.ResourceRef{Type: "payment", ID: "p2"},
@@ -184,6 +186,24 @@ func TestMTLSCredentialsPath(t *testing.T) {
 	})
 	if !resp.Allowed {
 		t.Fatalf("%+v", resp.Denial)
+	}
+
+	// Fingerprint knowledge alone must not authenticate.
+	resp = p.Runtime.Execute(context.Background(), core.Request{
+		Operation: "payment.capture",
+		Credentials: core.Credentials{
+			Scheme: "mtls",
+			Token:  "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff",
+		},
+		Boundary: "dev",
+		Resource: &core.ResourceRef{Type: "payment", ID: "p2"},
+		Input: map[string]any{
+			"amount": 10.0, "currency": "USD", "merchant_id": "m",
+		},
+		IdempotencyKey: "idem-mtls-forge",
+	})
+	if resp.Allowed {
+		t.Fatal("forged mtls without peer_verified must deny")
 	}
 }
 

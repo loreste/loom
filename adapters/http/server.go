@@ -60,6 +60,8 @@ type Server struct {
 	Config ServerConfig
 	mux    *http.ServeMux
 	http   *http.Server
+	// gql is non-nil when GraphQL is enabled and successfully constructed.
+	gql http.Handler
 }
 
 // NewServer builds routes. RT required.
@@ -83,6 +85,16 @@ func NewServer(rt *runtime.Runtime, cfg ServerConfig) (*Server, error) {
 		cfg.IdleTimeout = defaultIdleTO
 	}
 	s := &Server{RT: rt, Config: cfg, mux: http.NewServeMux()}
+	if cfg.EnableGraphQL {
+		h, err := loomgql.HandlerWithConfig(rt, loomgql.HandlerConfig{
+			MaxBodyBytes: cfg.MaxBodyBytes,
+			// Introspection off by default (recon surface).
+		})
+		if err != nil {
+			return nil, fmt.Errorf("graphql: %w", err)
+		}
+		s.gql = h
+	}
 	s.routes()
 	s.http = &http.Server{
 		Addr:              cfg.Addr,
@@ -110,11 +122,9 @@ func (s *Server) routes() {
 		s.mux.HandleFunc("POST /mcp", s.handleMCP)
 		s.mux.HandleFunc("GET /mcp", methodNotAllowed)
 	}
-	if s.Config.EnableGraphQL {
-		if h, err := loomgql.Handler(s.RT); err == nil {
-			s.mux.Handle("POST /graphql", h)
-			s.mux.HandleFunc("GET /graphql", methodNotAllowed)
-		}
+	if s.gql != nil {
+		s.mux.Handle("POST /graphql", s.gql)
+		s.mux.HandleFunc("GET /graphql", methodNotAllowed)
 	}
 	if s.Config.Registry != nil && s.Config.Verifier != nil {
 		s.mux.HandleFunc("GET /v1/openapi.json", s.handleOpenAPI)
@@ -165,9 +175,7 @@ func (s *Server) proxyOperation(w http.ResponseWriter, r *http.Request, op strin
 	}
 	md["adapter"] = "http"
 	md["remote_addr"] = stripPort(r.RemoteAddr)
-	if r.Header.Get("X-Loom-Bypass") != "" {
-		md["x-loom-bypass"] = "1"
-	}
+	applyHostileHeaders(md, r)
 	idem := eb.IdempotencyKey
 	if idem == "" {
 		idem = r.Header.Get("Idempotency-Key")
@@ -204,7 +212,7 @@ func (s *Server) handleNotFound(w http.ResponseWriter, r *http.Request) {
 		if s.Config.MCP != nil {
 			out["mcp"] = "POST /mcp"
 		}
-		if s.Config.EnableGraphQL {
+		if s.gql != nil {
 			out["graphql"] = "POST /graphql"
 		}
 		if s.Config.Registry != nil && s.Config.Verifier != nil {
@@ -223,7 +231,7 @@ func (s *Server) handleManifest(w http.ResponseWriter, _ *http.Request) {
 	if s.Config.MCP == nil {
 		m.MCPEndpoint = ""
 	}
-	if !s.Config.EnableGraphQL {
+	if s.gql == nil {
 		m.GraphQLEndpoint = ""
 	}
 	if s.Config.Registry == nil || s.Config.Verifier == nil {
@@ -358,12 +366,7 @@ func (s *Server) handleExecute(w http.ResponseWriter, r *http.Request) {
 	md["adapter"] = "http"
 	md["remote_addr"] = stripPort(r.RemoteAddr)
 	md["user_agent"] = truncate(r.UserAgent(), 200)
-	if v := r.Header.Get("X-Loom-Bypass"); v != "" {
-		md["x-loom-bypass"] = "1"
-	}
-	if v := r.Header.Get("X-Admin-Override"); v != "" {
-		md["x-admin-override"] = "1"
-	}
+	applyHostileHeaders(md, r)
 	// Do not pass through authorization header into metadata.
 
 	idem := eb.IdempotencyKey
@@ -421,6 +424,20 @@ func (s *Server) extractCredentials(r *http.Request) (core.Credentials, error) {
 		return core.Credentials{}, fmt.Errorf("invalid authorization")
 	}
 	return core.Credentials{Scheme: "bearer", Token: token}, nil
+}
+
+// applyHostileHeaders records bypass/admin-override headers as metadata
+// tripwires for policy. They never grant privilege.
+func applyHostileHeaders(md map[string]string, r *http.Request) {
+	if md == nil || r == nil {
+		return
+	}
+	if r.Header.Get("X-Loom-Bypass") != "" {
+		md["x-loom-bypass"] = "1"
+	}
+	if r.Header.Get("X-Admin-Override") != "" {
+		md["x-admin-override"] = "1"
+	}
 }
 
 // Handler is a backward-compatible single-endpoint adapter.

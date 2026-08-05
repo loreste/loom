@@ -245,21 +245,42 @@ func resultMap(resp core.Response) map[string]any {
 	return out
 }
 
+// HandlerConfig tunes the HTTP GraphQL edge.
+type HandlerConfig struct {
+	// MaxBodyBytes defaults to 1 MiB.
+	MaxBodyBytes int64
+	// AllowIntrospection enables __schema / __type (default false — production).
+	AllowIntrospection bool
+}
+
 // Handler serves GraphQL over HTTP (POST JSON body {query, variables}).
 // Always goes through Runtime.Execute for mutations.
 func Handler(rt *runtime.Runtime) (http.Handler, error) {
+	return HandlerWithConfig(rt, HandlerConfig{})
+}
+
+// HandlerWithConfig is Handler with size/introspection controls.
+func HandlerWithConfig(rt *runtime.Runtime, cfg HandlerConfig) (http.Handler, error) {
 	schema, err := Schema(rt)
 	if err != nil {
 		return nil, err
+	}
+	maxBody := cfg.MaxBodyBytes
+	if maxBody <= 0 {
+		maxBody = 1 << 20
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, `{"errors":[{"message":"POST only"}]}`, http.StatusMethodNotAllowed)
 			return
 		}
-		body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+		body, err := io.ReadAll(io.LimitReader(r.Body, maxBody+1))
 		if err != nil {
 			http.Error(w, `{"errors":[{"message":"read body"}]}`, http.StatusBadRequest)
+			return
+		}
+		if int64(len(body)) > maxBody {
+			http.Error(w, `{"errors":[{"message":"body too large"}]}`, http.StatusRequestEntityTooLarge)
 			return
 		}
 		var payload struct {
@@ -268,6 +289,10 @@ func Handler(rt *runtime.Runtime) (http.Handler, error) {
 		}
 		if err := json.Unmarshal(body, &payload); err != nil || payload.Query == "" {
 			http.Error(w, `{"errors":[{"message":"invalid graphql body"}]}`, http.StatusBadRequest)
+			return
+		}
+		if !cfg.AllowIntrospection && isIntrospectionQuery(payload.Query) {
+			http.Error(w, `{"errors":[{"message":"introspection disabled"}]}`, http.StatusForbidden)
 			return
 		}
 		ctx := WithHTTPRequest(r.Context(), r)
@@ -281,6 +306,12 @@ func Handler(rt *runtime.Runtime) (http.Handler, error) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		_ = json.NewEncoder(w).Encode(result)
 	}), nil
+}
+
+func isIntrospectionQuery(q string) bool {
+	// Conservative: block common introspection field names.
+	lq := strings.ToLower(q)
+	return strings.Contains(lq, "__schema") || strings.Contains(lq, "__type")
 }
 
 // Do executes a GraphQL request in-process (tests / embed).
