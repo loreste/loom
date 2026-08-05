@@ -52,6 +52,8 @@ type ServerConfig struct {
 	// Registry + Verifier; when either is nil the route is omitted.
 	Registry *core.Registry
 	Verifier identity.Verifier
+	// RateLimit optional per-IP edge limiter (before auth). Zero = disabled.
+	RateLimit RateLimitConfig
 }
 
 // Server is the hardened HTTP adapter.
@@ -62,6 +64,7 @@ type Server struct {
 	http   *http.Server
 	// gql is non-nil when GraphQL is enabled and successfully constructed.
 	gql http.Handler
+	rl  *rateLimiter
 }
 
 // NewServer builds routes. RT required.
@@ -84,11 +87,15 @@ func NewServer(rt *runtime.Runtime, cfg ServerConfig) (*Server, error) {
 	if cfg.IdleTimeout <= 0 {
 		cfg.IdleTimeout = defaultIdleTO
 	}
-	s := &Server{RT: rt, Config: cfg, mux: http.NewServeMux()}
+	s := &Server{RT: rt, Config: cfg, mux: http.NewServeMux(), rl: newRateLimiter(cfg.RateLimit)}
 	if cfg.EnableGraphQL {
+		requireMTLS := cfg.RequireMTLS
 		h, err := loomgql.HandlerWithConfig(rt, loomgql.HandlerConfig{
 			MaxBodyBytes: cfg.MaxBodyBytes,
 			// Introspection off by default (recon surface).
+			ExtractCredentials: func(r *http.Request) (core.Credentials, error) {
+				return ExtractCredentials(r, requireMTLS)
+			},
 		})
 		if err != nil {
 			return nil, fmt.Errorf("graphql: %w", err)
@@ -397,24 +404,30 @@ func (s *Server) handleExecute(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) extractCredentials(r *http.Request) (core.Credentials, error) {
+	return ExtractCredentials(r, s.Config.RequireMTLS)
+}
+
+// ExtractCredentials maps HTTP auth into Loom credentials.
+// mTLS: only when a verified peer cert is present (CredentialsFromCertificate).
+// Dual auth never ORs privileges: RequireMTLS or empty bearer → mTLS; else bearer only.
+func ExtractCredentials(r *http.Request, requireMTLS bool) (core.Credentials, error) {
+	if r == nil {
+		return core.Credentials{}, fmt.Errorf("nil request")
+	}
 	// Prefer mTLS when client cert present
 	if r.TLS != nil && len(r.TLS.PeerCertificates) > 0 {
 		leaf := r.TLS.PeerCertificates[0]
 		creds := identity.CredentialsFromCertificate(leaf)
-		// If also bearer present, do NOT merge privileges — mTLS wins when RequireMTLS
-		// or when Authorization empty. If both present without RequireMTLS, prefer bearer
-		// only when explicitly scheme bearer — adversarial: dual auth must not OR privileges.
 		auth := r.Header.Get("Authorization")
-		if s.Config.RequireMTLS || auth == "" {
+		if requireMTLS || auth == "" {
 			return creds, nil
 		}
-		// Both presented: use bearer only if valid format; mtls is ignored (not combined).
-		// This prevents "weak mtls + forged bearer" OR logic. Single scheme only.
+		// Both presented without RequireMTLS: bearer only (not combined).
 	}
 
 	auth := r.Header.Get("Authorization")
 	if auth == "" {
-		if s.Config.RequireMTLS {
+		if requireMTLS {
 			return core.Credentials{}, fmt.Errorf("client certificate required")
 		}
 		return core.Credentials{}, nil
@@ -455,7 +468,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.handleExecute(w, r)
 }
 
-// middleware applies security headers and basic request hygiene.
+// middleware applies security headers, edge rate limits, and basic request hygiene.
 func (s *Server) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Security headers (API, not browser app — still set conservative defaults)
@@ -469,6 +482,15 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 		if r.Method == http.MethodTrace || strings.EqualFold(r.Method, "TRACK") {
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 			return
+		}
+		// Edge rate limit (fail closed). Skip health probes.
+		path := r.URL.Path
+		if s.rl != nil && path != "/healthz" && path != "/readyz" {
+			if !s.rl.allow(clientIP(r)) {
+				w.Header().Set("Retry-After", "1")
+				writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "rate limit exceeded"})
+				return
+			}
 		}
 		next.ServeHTTP(w, r)
 	})

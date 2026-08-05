@@ -41,6 +41,8 @@ type Config struct {
 	Env string
 	// AllowDemo explicitly permits demo principals outside development.
 	AllowDemo bool
+	// HTTPRateLimitPerMin edge rate limit per client IP (0 = disabled).
+	HTTPRateLimitPerMin int
 	// PolicyPath file for distributed policy JSON.
 	PolicyPath string
 	// PolicySyncInterval e.g. 5s; empty = 5s default in bootstrap.
@@ -65,6 +67,7 @@ func Load() Config {
 		DisableDemoPrincipals: envBool("LOOM_DISABLE_DEMO_PRINCIPALS", false),
 		Env:                   strings.ToLower(env("LOOM_ENV", "development")),
 		AllowDemo:             envBool("LOOM_ALLOW_DEMO", false),
+		HTTPRateLimitPerMin:   envInt("LOOM_HTTP_RATE_LIMIT", 0),
 		PolicyPath:            os.Getenv("LOOM_POLICY_PATH"),
 		PolicySyncInterval:    ParseDurationEnv("LOOM_POLICY_SYNC_INTERVAL", 5*time.Second),
 	}

@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 
@@ -28,11 +29,17 @@ type ctxKey int
 const (
 	ctxHTTPRequest ctxKey = iota
 	ctxToken
+	ctxCredentials
 )
 
 // WithToken stores a bearer token on the context (tests / non-HTTP).
 func WithToken(ctx context.Context, token string) context.Context {
 	return context.WithValue(ctx, ctxToken, token)
+}
+
+// WithCredentials stores full Loom credentials (e.g. mTLS from HTTP TLS peer).
+func WithCredentials(ctx context.Context, creds core.Credentials) context.Context {
+	return context.WithValue(ctx, ctxCredentials, creds)
 }
 
 // WithHTTPRequest attaches the inbound *http.Request for auth/metadata.
@@ -161,11 +168,8 @@ func resolveExecute(p graphql.ResolveParams, rt *runtime.Runtime) (any, error) {
 		IdempotencyKey: strArg(raw, "idempotencyKey"),
 		ApprovalToken:  strArg(raw, "approvalToken"),
 		TraceID:        strArg(raw, "traceId"),
-		Credentials: core.Credentials{
-			Scheme: "bearer",
-			Token:  tokenFrom(p.Context),
-		},
-		Metadata: metadataFrom(p.Context),
+		Credentials:    credentialsFrom(p.Context),
+		Metadata:       metadataFrom(p.Context),
 	}
 	if res, ok := raw["resource"].(map[string]any); ok {
 		req.Resource = &core.ResourceRef{
@@ -183,14 +187,22 @@ func strArg(m map[string]any, k string) string {
 	return s
 }
 
-func tokenFrom(ctx context.Context) string {
+func credentialsFrom(ctx context.Context) core.Credentials {
+	if c, ok := ctx.Value(ctxCredentials).(core.Credentials); ok {
+		if c.Token != "" || c.Scheme == "mtls" {
+			return c
+		}
+	}
 	if t, ok := ctx.Value(ctxToken).(string); ok && t != "" {
-		return t
+		return core.Credentials{Scheme: "bearer", Token: t}
 	}
 	if r, ok := ctx.Value(ctxHTTPRequest).(*http.Request); ok && r != nil {
-		return bearer(r.Header.Get("Authorization"))
+		// Fallback: bearer only (HTTP edge should inject via ExtractCredentials).
+		if tok := bearer(r.Header.Get("Authorization")); tok != "" {
+			return core.Credentials{Scheme: "bearer", Token: tok}
+		}
 	}
-	return ""
+	return core.Credentials{}
 }
 
 func metadataFrom(ctx context.Context) map[string]string {
@@ -205,7 +217,13 @@ func metadataFrom(ctx context.Context) map[string]string {
 	if v := r.Header.Get("X-Admin-Override"); v != "" {
 		md["x-admin-override"] = "1"
 	}
-	md["remote_addr"] = r.RemoteAddr
+	// Strip port for consistency with the HTTP adapter.
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		md["remote_addr"] = r.RemoteAddr
+	} else {
+		md["remote_addr"] = host
+	}
 	return md
 }
 
@@ -251,6 +269,9 @@ type HandlerConfig struct {
 	MaxBodyBytes int64
 	// AllowIntrospection enables __schema / __type (default false — production).
 	AllowIntrospection bool
+	// ExtractCredentials optional; when set (HTTP edge), used for bearer + mTLS.
+	// Must not invent privileges — only map transport material.
+	ExtractCredentials func(r *http.Request) (core.Credentials, error)
 }
 
 // Handler serves GraphQL over HTTP (POST JSON body {query, variables}).
@@ -296,6 +317,12 @@ func HandlerWithConfig(rt *runtime.Runtime, cfg HandlerConfig) (http.Handler, er
 			return
 		}
 		ctx := WithHTTPRequest(r.Context(), r)
+		if cfg.ExtractCredentials != nil {
+			if creds, err := cfg.ExtractCredentials(r); err == nil {
+				ctx = WithCredentials(ctx, creds)
+			}
+			// Extract error → empty credentials (deny by pipeline); never 500 auth here.
+		}
 		result := graphql.Do(graphql.Params{
 			Schema:         schema,
 			RequestString:  payload.Query,

@@ -31,6 +31,8 @@ Last review: 2026-08-05. Scope: full pipeline + all adapters + bootstrap default
 12. **CLI god-paths** — `mint-jwt`, `approve`, `--issue-approval` require `LOOM_DEV_TOOLS=1`.
 13. **NetworkGuard DNS** — hostnames are resolved; any private/link-local/metadata answer is denied; DNS errors fail closed. Nested `url`/`host` fields scanned.
 14. **gRPC on serve** — `--grpc-addr=:9090` (or `LOOM_GRPC_ADDR`) starts `loom.v1.Runtime/Execute` with 1 MiB message caps.
+15. **HTTP edge rate limit** — `LOOM_HTTP_RATE_LIMIT` (req/min per IP); healthz/readyz exempt; does not trust `X-Forwarded-For`.
+16. **GraphQL credentials** — same `ExtractCredentials` as HTTP (bearer + mTLS peer cert).
 
 ## Residual risk (accepted / deferred)
 

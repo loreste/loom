@@ -255,6 +255,9 @@ func (a *Adapter) runServe(ctx context.Context, args []string) int {
 	}
 
 	cfg := loomhttp.ServerConfig{Addr: addr, Ready: readyFn}
+	if envCfg.HTTPRateLimitPerMin > 0 {
+		cfg.RateLimit = loomhttp.RateLimitConfig{RequestsPerMinute: envCfg.HTTPRateLimitPerMin}
+	}
 	certFile := flags["tls-cert"]
 	keyFile := flags["tls-key"]
 	clientCA := flags["client-ca"]

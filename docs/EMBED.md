@@ -213,6 +213,7 @@ row, err := ex.InsertReturning(ctx, db.InsertOpts{
 4. Register domain ops or `EnableDBOps`  
 5. Every side effect through `a.Call`  
 6. Audit sink in production (`AuditSink` or platform file/Postgres)  
+7. Multi-tenant data: pool-per-tenant, RLS, or product SQL that always filters by boundary — see [`TENANCY.md`](TENANCY.md)
 
 ## What not to do
 
