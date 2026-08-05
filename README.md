@@ -53,6 +53,17 @@ make release        # → dist/loom-<ver>-{linux,darwin,windows}-{amd64,arm64}[ 
 Binaries are pure Go (`CGO_ENABLED=0`). Checksums land in `dist/SHA256SUMS`.  
 Tag `v*` triggers the GitHub Release workflow (`.github/workflows/release.yml`).
 
+```bash
+# Install from local dist/ (macOS / Linux)
+./scripts/install.sh --from-dist --prefix "$HOME/.local"
+
+# Docker
+docker build -t loom:local .
+docker compose --profile loom up --build loom
+```
+
+Full packaging notes: [`docs/BUILD.md`](docs/BUILD.md).
+
 Deep dive: [`docs/EMBED.md`](docs/EMBED.md)
 
 ### App DB + jobs

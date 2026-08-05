@@ -1,4 +1,22 @@
 services:
+  # Optional Loom server (dev). Prefer explicit production env for real deploys.
+  loom:
+    build: .
+    ports:
+      - "8080:8080"
+      - "9090:9090"
+    environment:
+      LOOM_ENV: development
+      LOOM_ADDR: ":8080"
+      LOOM_GRPC_ADDR: ":9090"
+      # Point at compose postgres when using durable mode:
+      # LOOM_DATABASE_URL: postgres://loom:loom@postgres:5432/loom?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["serve", "--addr=:8080", "--grpc-addr=:9090"]
+    profiles: ["loom"]
+
   postgres:
     image: postgres:16-alpine
     environment:
