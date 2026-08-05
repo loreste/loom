@@ -3,6 +3,7 @@ package bootstrap
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -61,6 +62,9 @@ type Platform struct {
 	Redis *redis.Client
 	// Ready checks durable deps for HTTP /readyz.
 	Ready func(context.Context) error
+	// Metrics collects bounded pipeline observations; applications may bridge it
+	// to Prometheus or OpenTelemetry through their adapter.
+	Metrics *runtime.Metrics
 	// PolicySource is set when distributed policy is enabled (file or postgres).
 	PolicySource policy.Source
 	// PolicySyncer background applier; Stopped on Close.
@@ -68,6 +72,7 @@ type Platform struct {
 	// jwtIssuer/jwtAudience are the configured JWT iss/aud used by MintDemoJWT.
 	jwtIssuer   string
 	jwtAudience string
+	jwtKeyID    string
 	// auditFile is the JSONL audit sink handle (when AuditJSONL/DataDir set); closed by Close.
 	auditFile *os.File
 }
@@ -75,6 +80,7 @@ type Platform struct {
 // Config for platform bootstrap.
 type Config struct {
 	JWTSecret   []byte
+	JWTKeyID    string
 	JWTIssuer   string
 	JWTAudience string
 	AuditJSONL  string
@@ -110,15 +116,12 @@ type Config struct {
 
 // NewPlatform builds deny-by-default stack with demo principals and domain ops.
 func NewPlatform(cfg Config) (*Platform, error) {
-	if cfg.JWTIssuer == "" {
-		cfg.JWTIssuer = "loom"
-	}
-	if cfg.JWTAudience == "" {
-		cfg.JWTAudience = "loom-api"
-	}
 	secret := cfg.JWTSecret
 	if len(secret) == 0 {
-		secret = []byte("dev-only-loom-jwt-secret-32b!!") // NEVER use in prod
+		secret = make([]byte, 32)
+		if _, err := rand.Read(secret); err != nil {
+			return nil, fmt.Errorf("generate ephemeral jwt secret: %w", err)
+		}
 	}
 	if len(secret) < 16 {
 		return nil, fmt.Errorf("%w: jwt secret too short", core.ErrInvalidArgument)
@@ -130,11 +133,22 @@ func NewPlatform(cfg Config) (*Platform, error) {
 	if cfg.RequireDurable && !cfg.DisableDemoPrincipals {
 		return nil, fmt.Errorf("%w: RequireDurable set but demo principals enabled (set DisableDemoPrincipals)", core.ErrInvalidArgument)
 	}
+	if cfg.RequireDurable {
+		if cfg.DatabaseURL == "" && cfg.DataDir == "" {
+			return nil, fmt.Errorf("%w: RequireDurable requires DatabaseURL or DataDir", core.ErrInvalidArgument)
+		}
+		if cfg.RedisURL == "" {
+			return nil, fmt.Errorf("%w: RequireDurable requires RedisURL for distributed quota state", core.ErrInvalidArgument)
+		}
+		if len(cfg.JWTSecret) == 0 {
+			return nil, fmt.Errorf("%w: RequireDurable requires an injected JWT secret", core.ErrInvalidArgument)
+		}
+	}
 
 	reg := core.NewRegistry()
 	mem := identity.NewMemoryVerifier()
 	jwt, err := identity.NewJWTVerifier(identity.JWTConfig{
-		Secrets:  map[string][]byte{"": secret, "loom": secret},
+		Secrets:  map[string][]byte{cfg.JWTKeyID: secret},
 		Issuer:   cfg.JWTIssuer,
 		Audience: cfg.JWTAudience,
 	})
@@ -156,17 +170,17 @@ func NewPlatform(cfg Config) (*Platform, error) {
 	memSink := &audit.MemorySink{}
 
 	var (
-		apr         approval.Store
-		idem        idempotency.Store
-		auditPath   = cfg.AuditJSONL
-		db          *sql.DB
-		rdb         *redis.Client
-		readyFns    []func(context.Context) error
-		extraSink   audit.Sink
-		limiter     quotas.Limiter
-		policySrc   policy.Source
-		pgBundle    *postgres.Bundle
-		auditFile   *os.File
+		apr       approval.Store
+		idem      idempotency.Store
+		auditPath = cfg.AuditJSONL
+		db        *sql.DB
+		rdb       *redis.Client
+		readyFns  []func(context.Context) error
+		extraSink audit.Sink
+		limiter   quotas.Limiter
+		policySrc policy.Source
+		pgBundle  *postgres.Bundle
+		auditFile *os.File
 	)
 
 	// Quotas: Redis when configured, else memory. Shared Config for limits.
@@ -258,7 +272,7 @@ func NewPlatform(cfg Config) (*Platform, error) {
 			return nil, err
 		}
 		auditFile = f
-		sinks = append(sinks, audit.NewWriterSink(f))
+		sinks = append(sinks, audit.NewDurableWriterSink(f))
 	}
 	var auditLogger *audit.Logger
 	if len(sinks) == 1 {
@@ -269,6 +283,7 @@ func NewPlatform(cfg Config) (*Platform, error) {
 
 	gr := guardrails.DefaultChain()
 	gr.Add(&guardrails.FinancialGuard{MaxAmount: 10_000})
+	metrics := runtime.NewMetrics()
 
 	rt, err := runtime.New(runtime.Dependencies{
 		Registry:    reg,
@@ -285,6 +300,7 @@ func NewPlatform(cfg Config) (*Platform, error) {
 		Quotas:      limiter,
 		Idempotency: idem,
 		Audit:       auditLogger,
+		Observer:    metrics,
 	})
 	if err != nil {
 		if auditFile != nil {
@@ -329,8 +345,10 @@ func NewPlatform(cfg Config) (*Platform, error) {
 		DB:          db,
 		Redis:       rdb,
 		Ready:       ready,
+		Metrics:     metrics,
 		jwtIssuer:   cfg.JWTIssuer,
 		jwtAudience: cfg.JWTAudience,
+		jwtKeyID:    cfg.JWTKeyID,
 		auditFile:   auditFile,
 	}
 	// Policy source: explicit file path overrides; else postgres when available;
@@ -635,23 +653,22 @@ func (p *Platform) MintDemoJWT(sub core.PrincipalID, boundary core.BoundaryID, c
 	}
 	now := time.Now()
 	iss, aud := p.jwtIssuer, p.jwtAudience
-	if iss == "" {
-		iss = "loom"
-	}
-	if aud == "" {
-		aud = "loom-api"
-	}
-	return identity.MintHS256(p.JWTSecret, "loom", map[string]any{
+	claims := map[string]any{
 		"sub":          string(sub),
-		"iss":          iss,
-		"aud":          aud,
 		"exp":          now.Add(ttl).Unix(),
 		"iat":          now.Unix(),
 		"nbf":          now.Unix(),
 		"boundary":     string(boundary),
 		"typ":          typ,
 		"capabilities": caps,
-	})
+	}
+	if iss != "" {
+		claims["iss"] = iss
+	}
+	if aud != "" {
+		claims["aud"] = aud
+	}
+	return identity.MintHS256(p.JWTSecret, p.jwtKeyID, claims)
 }
 
 // IssueApproval is a convenience for demos/tests (bypasses governed op — test only).

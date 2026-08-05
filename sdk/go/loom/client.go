@@ -103,6 +103,7 @@ func (c *HTTPClient) Call(ctx context.Context, req core.Request) (core.Response,
 		return denySDK(err.Error()), err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set(core.ProtocolHeader, core.ProtocolVersion)
 	if token != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+token)
 	}
@@ -127,9 +128,6 @@ func (c *HTTPClient) OpenAPI(ctx context.Context) (map[string]any, error) {
 
 // CatalogSpec calls the governed catalog.spec operation and returns tool specs.
 func (c *HTTPClient) CatalogSpec(ctx context.Context, boundary string) (core.Response, error) {
-	if boundary == "" {
-		boundary = "dev"
-	}
 	return c.Call(ctx, core.Request{
 		Operation:   "catalog.spec",
 		Boundary:    core.BoundaryID(boundary),
@@ -153,6 +151,7 @@ func (c *HTTPClient) MCP(ctx context.Context, rpcReq map[string]any) (map[string
 		return nil, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set(core.ProtocolHeader, core.ProtocolVersion)
 	if c.Token != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+c.Token)
 	}
@@ -184,6 +183,7 @@ func (c *HTTPClient) getJSON(ctx context.Context, path string, auth bool) (map[s
 	if auth && c.Token != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+c.Token)
 	}
+	httpReq.Header.Set(core.ProtocolHeader, core.ProtocolVersion)
 	if c.UserAgent != "" {
 		httpReq.Header.Set("User-Agent", c.UserAgent)
 	}

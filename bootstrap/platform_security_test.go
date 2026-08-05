@@ -35,11 +35,9 @@ func TestRequireDurableRefusesDemoPrincipals(t *testing.T) {
 	if _, err := bootstrap.NewPlatform(bootstrap.Config{RequireDurable: true}); err == nil {
 		t.Fatal("expected refusal: RequireDurable with demo principals enabled")
 	}
-	p, err := bootstrap.NewPlatform(bootstrap.Config{RequireDurable: true, DisableDemoPrincipals: true})
-	if err != nil {
-		t.Fatal(err)
+	if _, err := bootstrap.NewPlatform(bootstrap.Config{RequireDurable: true, DisableDemoPrincipals: true}); err == nil {
+		t.Fatal("expected refusal when durable stores and identity secret are not configured")
 	}
-	t.Cleanup(func() { _ = p.Close() })
 }
 
 // TestMintDemoJWTUsesConfiguredIssuerAudience: demo tokens must verify under

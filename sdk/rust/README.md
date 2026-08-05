@@ -1,5 +1,15 @@
 # Loom Rust SDK
 
+## Use from a checkout
+
+```toml
+[dependencies]
+loom-sdk = { path = "../loom/sdk/rust" }
+```
+
+The client talks to a running Loom HTTP adapter; authorization remains
+server-side. See [`../../docs/INSTALL.md`](../../docs/INSTALL.md).
+
 ```rust
 use loom_sdk::{Call, Client, ResourceRef};
 use serde_json::json;

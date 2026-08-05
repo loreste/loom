@@ -1,5 +1,25 @@
 # Loom
 
+Loom is an embed-first governance runtime for Go applications. It puts one
+controlled execution boundary in front of handlers, database operations,
+background jobs, payments, provisioning, and administrative actions.
+
+Loom has been used internally for the past two months. We are now open-sourcing
+it so teams can inspect the design, use the runtime in their own applications,
+and contribute improvements to a problem we have been solving in practice.
+
+Applications need this because sensitive work rarely has only one entry point.
+The same operation may be reachable through an HTTP request, a worker, an
+internal service, an MCP tool, or in-process code. If each path implements its
+own authentication, authorization, tenant checks, approvals, and auditing,
+the rules drift and one path eventually becomes a bypass.
+
+Loom routes those paths through `app.Call` / `Runtime.Execute`. It is
+deny-by-default, fail-closed, and designed to keep the enforcement logic shared
+when a new adapter or worker is added. Read the full explanation in
+[`docs/OVERVIEW.md`](docs/OVERVIEW.md), then use [`docs/INSTALL.md`](docs/INSTALL.md)
+to get started.
+
 Loom is a small Go library that sits in front of the parts of your app that
 actually do things—call a handler, touch a database, run a job—and decides
 whether that call is allowed.
@@ -8,7 +28,7 @@ You embed it in your process. There is no separate authz service to deploy
 unless you want one later. HTTP, MCP, GraphQL, and gRPC are optional adapters
 on top of the same runtime; they do not get a shortcut around it.
 
-**Status:** v0.1.0. Useful if you are building in Go and want a single place
+**Status:** v0.1.1. Useful if you are building in Go and want a single place
 for identity, policy, and safe DB access. Not a full identity platform, not
 an ORM, and not a replacement for careful application design.
 
@@ -49,6 +69,16 @@ Default decision is **deny**. Missing rules, eval errors, and most
 misconfiguration fail closed rather than open.
 
 ## Quick start
+
+New users: start with [`docs/INSTALL.md`](docs/INSTALL.md), then follow
+[`docs/HOWTO.md`](docs/HOWTO.md). The shortest local path is:
+
+```bash
+git clone https://github.com/loreste/loom.git
+cd loom
+make build
+go run ./examples/orders-app/
+```
 
 ```bash
 go test -race ./...
@@ -108,7 +138,7 @@ go build -o loom ./cmd/loom
 ./loom serve --addr=:8080
 ```
 
-Version string defaults to the value in `VERSION` (0.1.0) unless you inject
+Version string defaults to the value in `VERSION` (0.1.1) unless you inject
 ldflags yourself.
 
 ## What is in the tree
@@ -131,6 +161,13 @@ ldflags yourself.
   real verifier for production.
 - **Demo users:** The CLI platform ships known tokens when demos are
   enabled. Do not expose that configuration on a public network.
+
+Production construction, identity integration, compatibility guarantees,
+observability, and the tenant/RLS reference are documented in
+[`docs/BUILD.md`](docs/BUILD.md), [`docs/IDENTITY.md`](docs/IDENTITY.md),
+[`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md),
+[`docs/OBSERVABILITY.md`](docs/OBSERVABILITY.md), and
+[`examples/tenancy/README.md`](examples/tenancy/README.md).
 
 ## License
 

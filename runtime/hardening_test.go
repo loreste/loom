@@ -195,7 +195,6 @@ func (e consumeFailEngine) Consume(context.Context, core.Identity, *core.Operati
 // the handler, and the token must remain unconsumed for a healthy retry.
 func TestApprovalConsumeFailureFailsClosed(t *testing.T) {
 	s := setupGranted(t)
-	var handlerRan atomic.Bool
 	// Ensure payment handler is still registered; we only swap approval engine.
 	rt := stackWith(t, s, func(d *runtime.Dependencies) {
 		d.Approval = consumeFailEngine{inner: s.Approval}
@@ -211,7 +210,6 @@ func TestApprovalConsumeFailureFailsClosed(t *testing.T) {
 	if resp.Output != nil {
 		t.Fatalf("output must not be returned on consume failure: %v", resp.Output)
 	}
-	_ = handlerRan
 
 	// Token was not burned: a healthy runtime accepts it.
 	resp = s.Runtime.Execute(context.Background(), paymentReq("tok-cf", "idem-cf2"))

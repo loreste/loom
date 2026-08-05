@@ -19,6 +19,8 @@ func TestRequireDurable(t *testing.T) {
 		t.Fatal("expected require durable failure")
 	}
 	t.Setenv("LOOM_DATA_DIR", "/tmp/loom")
+	t.Setenv("LOOM_REDIS_URL", "redis://127.0.0.1:6379/0")
+	t.Setenv("LOOM_JWT_SECRET", "configured-test-secret-1234")
 	c = config.Load()
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)

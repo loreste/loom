@@ -2,6 +2,10 @@
 
 ## Goal
 
+New to Loom? Install the CLI or module with [`INSTALL.md`](INSTALL.md), then
+use [`HOWTO.md`](HOWTO.md) for operation, SQL, job, approval, and observability
+recipes.
+
 Ship product features with **identity, authorization, and safe database access** without designing a custom authz microservice or exposing SQL to clients.
 
 ## Pattern A — Product operations (recommended)
@@ -200,6 +204,18 @@ row, err := ex.InsertReturning(ctx, db.InsertOpts{
 })
 // Postgres: INSERT … RETURNING; SQLite: insert + last_insert_rowid()
 ```
+
+## Production embedded construction
+
+Use `app.Config.Environment="production"` together with injected durable
+approval, quota, idempotency, and audit implementations and an explicit
+`IdentityVerifier`. `RequireDurableSecurityState` can be set independently for
+staging checks. `app.New` rejects process-local implementations in that mode;
+it does not silently upgrade memory state or invent identity configuration.
+
+The application owns the concrete OIDC/JWKS or mTLS verifier and the mapping
+from identity claims to boundaries. See [`IDENTITY.md`](IDENTITY.md) and
+[`COMPATIBILITY.md`](COMPATIBILITY.md) before exposing an adapter.
 
 ## Minimal secure checklist
 

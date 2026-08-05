@@ -123,6 +123,7 @@ impl Client {
             .http
             .post(format!("{}/v1/execute", self.base_url))
             .header(CONTENT_TYPE, "application/json")
+            .header("X-Loom-Protocol-Version", "1")
             .header(USER_AGENT, "loom-rust-sdk/0.3")
             .json(&body);
         if !bearer.is_empty() {
@@ -142,6 +143,7 @@ impl Client {
             .http
             .get(format!("{}/.well-known/loom.json", self.base_url))
             .header(USER_AGENT, "loom-rust-sdk/0.4")
+            .header("X-Loom-Protocol-Version", "1")
             .send()
             .await?;
         Ok(res.json().await?)
@@ -152,7 +154,8 @@ impl Client {
         let mut req = self
             .http
             .get(format!("{}/v1/openapi.json", self.base_url))
-            .header(USER_AGENT, "loom-rust-sdk/0.4");
+            .header(USER_AGENT, "loom-rust-sdk/0.4")
+            .header("X-Loom-Protocol-Version", "1");
         if !self.token.is_empty() {
             req = req.header(AUTHORIZATION, format!("Bearer {}", self.token));
         }
@@ -166,6 +169,7 @@ impl Client {
             .http
             .post(format!("{}/mcp", self.base_url))
             .header(CONTENT_TYPE, "application/json")
+            .header("X-Loom-Protocol-Version", "1")
             .header(USER_AGENT, "loom-rust-sdk/0.4")
             .json(&rpc);
         if !self.token.is_empty() {
@@ -176,5 +180,41 @@ impl Client {
             return Ok(Value::Object(Default::default()));
         }
         Ok(res.json().await?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Call, Client};
+    use serde_json::json;
+    use std::collections::HashMap;
+
+    #[tokio::test]
+    async fn execute_contract_when_configured() {
+        let Ok(base_url) = std::env::var("LOOM_CONTRACT_URL") else {
+            return;
+        };
+        let client = Client::new(
+            base_url,
+            std::env::var("LOOM_CONTRACT_TOKEN").expect("contract token"),
+        )
+        .expect("client");
+        let response = client
+            .call(Call {
+                operation: std::env::var("LOOM_CONTRACT_OPERATION").expect("contract operation"),
+                boundary: std::env::var("LOOM_CONTRACT_BOUNDARY").expect("contract boundary"),
+                input: json!({}),
+                resource: None,
+                fields: None,
+                idempotency_key: None,
+                approval_token: None,
+                token: None,
+                metadata: HashMap::new(),
+                trace_id: None,
+            })
+            .await
+            .expect("contract response");
+        assert!(response.allowed, "{response:?}");
+        assert_eq!(response.output.expect("output")["status"], "ok");
     }
 }

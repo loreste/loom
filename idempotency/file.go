@@ -20,6 +20,9 @@ type FileStore struct {
 	data map[string]*entry
 }
 
+// Durable reports whether idempotency state survives process restart.
+func (s *FileStore) Durable() bool { return s != nil }
+
 type fileSnap struct {
 	Entries map[string]*persistedEntry `json:"entries"`
 }

@@ -19,9 +19,11 @@ type Config struct {
 	DatabaseURL string
 	// RedisURL redis://host:6379/0 for distributed quotas.
 	RedisURL string
-	// JWTSecret raw secret (min 16); empty = bootstrap dev default.
+	// JWTSecret raw secret (min 16); empty generates an ephemeral development
+	// secret and is rejected by production validation.
 	JWTSecret string
 	// JWTIssuer / JWTAudience.
+	JWTKeyID    string
 	JWTIssuer   string
 	JWTAudience string
 	// AuditJSONL optional path.
@@ -57,8 +59,9 @@ func Load() Config {
 		DatabaseURL:           os.Getenv("LOOM_DATABASE_URL"),
 		RedisURL:              os.Getenv("LOOM_REDIS_URL"),
 		JWTSecret:             os.Getenv("LOOM_JWT_SECRET"),
-		JWTIssuer:             env("LOOM_JWT_ISSUER", "loom"),
-		JWTAudience:           env("LOOM_JWT_AUDIENCE", "loom-api"),
+		JWTKeyID:              os.Getenv("LOOM_JWT_KEY_ID"),
+		JWTIssuer:             os.Getenv("LOOM_JWT_ISSUER"),
+		JWTAudience:           os.Getenv("LOOM_JWT_AUDIENCE"),
 		AuditJSONL:            os.Getenv("LOOM_AUDIT_JSONL"),
 		PGMaxOpenConns:        envInt("LOOM_PG_MAX_OPEN", 20),
 		PGMaxIdleConns:        envInt("LOOM_PG_MAX_IDLE", 5),
@@ -90,6 +93,12 @@ func (c Config) Validate() error {
 		if c.DatabaseURL == "" && c.DataDir == "" {
 			return fmt.Errorf("LOOM_REQUIRE_DURABLE set but no LOOM_DATABASE_URL or LOOM_DATA_DIR")
 		}
+		if c.RedisURL == "" {
+			return fmt.Errorf("LOOM_REQUIRE_DURABLE requires LOOM_REDIS_URL for distributed quota state")
+		}
+		if c.JWTSecret == "" {
+			return fmt.Errorf("LOOM_REQUIRE_DURABLE requires LOOM_JWT_SECRET")
+		}
 	}
 	if c.JWTSecret != "" && len(c.JWTSecret) < 16 {
 		return fmt.Errorf("LOOM_JWT_SECRET too short (min 16 bytes)")
@@ -103,6 +112,9 @@ func (c Config) Validate() error {
 		}
 		if c.JWTSecret == "" {
 			return fmt.Errorf("LOOM_ENV=%s requires LOOM_JWT_SECRET (min 16 bytes)", c.Env)
+		}
+		if c.JWTIssuer == "" || c.JWTAudience == "" {
+			return fmt.Errorf("LOOM_ENV=%s requires LOOM_JWT_ISSUER and LOOM_JWT_AUDIENCE", c.Env)
 		}
 		if !c.RequireDurable {
 			return fmt.Errorf("LOOM_ENV=%s requires LOOM_REQUIRE_DURABLE=true with LOOM_DATABASE_URL or LOOM_DATA_DIR", c.Env)

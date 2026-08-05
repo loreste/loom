@@ -21,6 +21,9 @@ type FileEngine struct {
 	tokens map[string]*Record
 }
 
+// Durable reports whether approval state survives process restart.
+func (e *FileEngine) Durable() bool { return e != nil }
+
 type fileSnapshot struct {
 	Tokens map[string]*Record `json:"tokens"`
 }

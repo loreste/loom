@@ -43,6 +43,9 @@ type MemoryStore struct {
 	data map[string]*entry
 }
 
+// Durable reports whether idempotency state survives process restart.
+func (s *MemoryStore) Durable() bool { return false }
+
 type entry struct {
 	fingerprint string
 	response    *core.Response

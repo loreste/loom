@@ -69,6 +69,7 @@ export class Client {
     };
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
+      "X-Loom-Protocol-Version": "1",
       "User-Agent": "loom-typescript-sdk/0.4",
     };
     const bearer = opts.token ?? this.token;
@@ -107,7 +108,7 @@ export class Client {
   }
 
   /** Governed catalog.spec call. */
-  async catalogSpec(boundary = "dev", token?: string): Promise<Response> {
+  async catalogSpec(boundary: string, token?: string): Promise<Response> {
     return this.call({
       operation: "catalog.spec",
       boundary,
@@ -125,6 +126,7 @@ export class Client {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       "User-Agent": "loom-typescript-sdk/0.4",
+      "X-Loom-Protocol-Version": "1",
     };
     const bearer = token ?? this.token;
     if (bearer) headers["Authorization"] = `Bearer ${bearer}`;
@@ -147,6 +149,7 @@ export class Client {
     const url = `${this.baseUrl.replace(/\/$/, "")}${path}`;
     const headers: Record<string, string> = {
       "User-Agent": "loom-typescript-sdk/0.4",
+      "X-Loom-Protocol-Version": "1",
     };
     if (auth) {
       const bearer = token ?? this.token;

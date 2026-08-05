@@ -35,6 +35,10 @@ type MemoryLimiter struct {
 	state map[string]*windowState
 }
 
+// Durable reports whether quota state survives process restart. Memory quota
+// state is process-local and must not be used for production coordination.
+func (l *MemoryLimiter) Durable() bool { return false }
+
 type windowState struct {
 	count int64
 	reset time.Time

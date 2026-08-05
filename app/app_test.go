@@ -1,6 +1,7 @@
 package app_test
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/loreste/loom/app"
+	"github.com/loreste/loom/audit"
 	"github.com/loreste/loom/config"
 	"github.com/loreste/loom/core"
 	"github.com/loreste/loom/db"
@@ -29,6 +31,23 @@ func TestDefaultDenyNoUsers(t *testing.T) {
 	})
 	if resp.Allowed {
 		t.Fatal("empty app must deny")
+	}
+}
+
+func TestProductionRequiresInjectedDurableSecurityState(t *testing.T) {
+	if _, err := app.New(app.Config{Environment: "production"}); err == nil {
+		t.Fatal("production app must reject implicit in-memory security state")
+	}
+	if _, err := app.New(app.Config{RequireDurableSecurityState: true}); err == nil {
+		t.Fatal("durable mode must reject process-local dependencies")
+	}
+	// A durable audit sink alone is not enough; every critical store must be
+	// explicitly supplied and validated by the constructor.
+	if _, err := app.New(app.Config{
+		RequireDurableSecurityState: true,
+		AuditSink:                   audit.NewWriterSink(&bytes.Buffer{}),
+	}); err == nil {
+		t.Fatal("durable mode must reject missing approval/quota/idempotency stores")
 	}
 }
 

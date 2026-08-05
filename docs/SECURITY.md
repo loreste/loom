@@ -62,8 +62,8 @@ export LOOM_DISABLE_DEMO_PRINCIPALS=true
 export LOOM_REQUIRE_DURABLE=true
 export LOOM_DATABASE_URL='postgres://…'
 export LOOM_JWT_SECRET='…'   # ≥16 bytes, not dev-only*
-# optional
-export LOOM_REDIS_URL='redis://…'
+# required by durable quota enforcement
+export LOOM_REDIS_URL='redis://…'   # required for durable distributed quota state
 export LOOM_QUOTA_FAIL_CLOSED=true
 ```
 

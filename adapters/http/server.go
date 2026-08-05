@@ -30,11 +30,11 @@ const (
 
 // ServerConfig tunes the HTTP edge.
 type ServerConfig struct {
-	Addr            string
-	MaxBodyBytes    int64
-	ReadTimeout     time.Duration
-	WriteTimeout    time.Duration
-	IdleTimeout     time.Duration
+	Addr         string
+	MaxBodyBytes int64
+	ReadTimeout  time.Duration
+	WriteTimeout time.Duration
+	IdleTimeout  time.Duration
 	// RequireMTLS demands a verified client cert (tls.RequestClientCert+Verify).
 	RequireMTLS bool
 	// TLSConfig optional; when set, ListenAndServeTLS uses it.
@@ -54,6 +54,9 @@ type ServerConfig struct {
 	Verifier identity.Verifier
 	// RateLimit optional per-IP edge limiter (before auth). Zero = disabled.
 	RateLimit RateLimitConfig
+	// Metrics exposes GET /metrics when configured. The collector is optional
+	// so embedding applications can choose their own telemetry bridge.
+	Metrics *runtime.Metrics
 }
 
 // Server is the hardened HTTP adapter.
@@ -135,6 +138,9 @@ func (s *Server) routes() {
 	}
 	if s.Config.Registry != nil && s.Config.Verifier != nil {
 		s.mux.HandleFunc("GET /v1/openapi.json", s.handleOpenAPI)
+	}
+	if s.Config.Metrics != nil {
+		s.mux.HandleFunc("GET /metrics", s.handleMetrics)
 	}
 	s.mux.HandleFunc("/", s.handleNotFound)
 }
@@ -305,6 +311,15 @@ func (s *Server) handleOpenAPI(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set(core.ProtocolHeader, core.ProtocolVersion)
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+	w.WriteHeader(http.StatusOK)
+	if s.Config.Metrics != nil {
+		_, _ = io.WriteString(w, s.Config.Metrics.Prometheus())
+	}
 }
 
 func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
@@ -520,6 +535,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 }
 
 func writeExecuteResponse(w http.ResponseWriter, resp core.Response) {
+	w.Header().Set(core.ProtocolHeader, core.ProtocolVersion)
 	if resp.TraceID != "" {
 		w.Header().Set("X-Trace-Id", resp.TraceID)
 	}
@@ -547,6 +563,7 @@ func writeExecuteResponse(w http.ResponseWriter, resp core.Response) {
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set(core.ProtocolHeader, core.ProtocolVersion)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	enc := json.NewEncoder(w)
