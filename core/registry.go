@@ -43,7 +43,9 @@ func (r *Registry) Register(op *Operation, h Handler) error {
 		return fmt.Errorf("%w: operation %q", ErrAlreadyExists, op.Name)
 	}
 	// Copy to prevent external mutation after register.
-	r.ops[op.Name] = copyOperation(op)
+	registered := copyOperation(op)
+	registered.Version = NormalizeOperationVersion(registered.Version)
+	r.ops[op.Name] = registered
 	r.handlers[op.Name] = h
 	return nil
 }
@@ -97,6 +99,19 @@ func (r *Registry) Get(name string) (*Operation, error) {
 		return nil, fmt.Errorf("%w: operation %q", ErrNotFound, name)
 	}
 	return copyOperation(op), nil
+}
+
+// GetVersion returns an operation only when the requested contract version
+// matches exactly. Empty version means DefaultOperationVersion.
+func (r *Registry) GetVersion(name, version string) (*Operation, error) {
+	op, err := r.Get(name)
+	if err != nil {
+		return nil, err
+	}
+	if NormalizeOperationVersion(version) != NormalizeOperationVersion(op.Version) {
+		return nil, fmt.Errorf("%w: operation %q version %q", ErrNotFound, name, version)
+	}
+	return op, nil
 }
 
 // Handler returns the handler or ErrNotFound.

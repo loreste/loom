@@ -20,20 +20,24 @@ import (
 
 // Event is one immutable audit record.
 type Event struct {
-	ID        string    `json:"id"`
-	Timestamp time.Time `json:"timestamp"`
-	TraceID   string    `json:"trace_id"`
-	Decision  string    `json:"decision"`
-	Reason    string    `json:"reason,omitempty"`
-	Step      string    `json:"step,omitempty"`
-	Message   string    `json:"message,omitempty"`
-	Principal string    `json:"principal,omitempty"`
-	Delegator string    `json:"delegator,omitempty"`
-	Boundary  string    `json:"boundary,omitempty"`
-	TenantID  string    `json:"tenant_id,omitempty"`
-	Operation string    `json:"operation"`
-	Resource  string    `json:"resource,omitempty"`
-	Risk      string    `json:"risk,omitempty"`
+	ID                 string    `json:"id"`
+	ExecutionID        string    `json:"execution_id,omitempty"`
+	Timestamp          time.Time `json:"timestamp"`
+	TraceID            string    `json:"trace_id"`
+	Decision           string    `json:"decision"`
+	Reason             string    `json:"reason,omitempty"`
+	Step               string    `json:"step,omitempty"`
+	Message            string    `json:"message,omitempty"`
+	Principal          string    `json:"principal,omitempty"`
+	Delegator          string    `json:"delegator,omitempty"`
+	Boundary           string    `json:"boundary,omitempty"`
+	BoundaryType       string    `json:"boundary_type,omitempty"`
+	BoundaryParentType string    `json:"boundary_parent_type,omitempty"`
+	BoundaryParentID   string    `json:"boundary_parent_id,omitempty"`
+	TenantID           string    `json:"tenant_id,omitempty"`
+	Operation          string    `json:"operation"`
+	Resource           string    `json:"resource,omitempty"`
+	Risk               string    `json:"risk,omitempty"`
 	// Input is redacted.
 	Input map[string]any `json:"input,omitempty"`
 	// Metadata is redacted copy of request metadata (no tokens).

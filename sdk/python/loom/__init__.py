@@ -30,6 +30,9 @@ class Response:
     audit_id: str = ""
     idempotent_replay: bool = False
     risk: str = ""
+    outcome: str = "denied"
+    execution_id: str = ""
+    reliability_warning: str = ""
 
 
 @dataclass
@@ -61,6 +64,9 @@ def _parse_response(obj: Mapping[str, Any]) -> Response:
         audit_id=str(obj.get("AuditID", obj.get("audit_id", ""))),
         idempotent_replay=bool(obj.get("IdempotentReplay", obj.get("idempotent_replay", False))),
         risk=str(obj.get("Risk", obj.get("risk", ""))),
+        outcome=str(obj.get("Outcome", obj.get("outcome", "denied"))),
+        execution_id=str(obj.get("ExecutionID", obj.get("execution_id", ""))),
+        reliability_warning=str(obj.get("ReliabilityWarning", obj.get("reliability_warning", ""))),
     )
 
 
@@ -71,11 +77,12 @@ class Client:
     base_url: str
     token: str = ""
     timeout: float = 30.0
-    user_agent: str = "loom-python-sdk/0.4"
+    user_agent: str = "loom-python-sdk/0.1.3"
 
     def call(
         self,
         operation: str,
+        operation_version: str = "",
         *,
         boundary: str,
         input: Optional[Mapping[str, Any]] = None,
@@ -90,6 +97,7 @@ class Client:
         url = self.base_url.rstrip("/") + "/v1/execute"
         body: dict[str, Any] = {
             "operation": operation,
+        "operation_version": operation_version,
             "boundary": boundary,
             "input": dict(input or {}),
             "metadata": {"adapter": "sdk-python", **dict(metadata or {})},

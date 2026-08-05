@@ -12,6 +12,24 @@ import (
 // Anything that is not ExplicitAllow is treated as deny.
 type Decision int
 
+// Outcome describes what the caller can safely rely on after execution.
+// ExecutedUnconfirmed is distinct from deny: the handler may have produced a
+// side effect, but post-execution recording did not complete.
+type Outcome string
+
+const (
+	OutcomeDenied              Outcome = "denied"
+	OutcomeAllowed             Outcome = "allowed"
+	OutcomeExecutedUnconfirmed Outcome = "executed_unconfirmed"
+)
+
+func (o Outcome) String() string {
+	if o == "" {
+		return string(OutcomeDenied)
+	}
+	return string(o)
+}
+
 const (
 	// DecisionDeny is the default. Zero value is deny (adversarial default).
 	DecisionDeny Decision = iota
@@ -61,27 +79,28 @@ func (d Decision) Allowed() bool { return d == DecisionAllow }
 
 // Reason codes for deny/approval. Stable for audit and client mapping.
 const (
-	ReasonUnauthenticated      = "unauthenticated"
-	ReasonInvalidDelegation    = "invalid_delegation"
-	ReasonBoundaryViolation    = "boundary_violation"
-	ReasonOperationDenied      = "operation_denied"
-	ReasonResourceDenied       = "resource_denied"
-	ReasonFieldDenied          = "field_denied"
-	ReasonPolicyDeny           = "policy_deny"
-	ReasonPolicyError          = "policy_error" // fail-closed: eval error == deny
-	ReasonGuardrail            = "guardrail"
-	ReasonRiskBlocked          = "risk_blocked"
-	ReasonApprovalRequired     = "approval_required"
-	ReasonApprovalDenied       = "approval_denied"
-	ReasonQuotaExceeded        = "quota_exceeded"
-	ReasonIdempotencyConflict  = "idempotency_conflict"
-	ReasonSchemaInvalid        = "schema_invalid"
-	ReasonOperationUnknown     = "operation_unknown"
-	ReasonHandlerMissing       = "handler_missing"
-	ReasonExecutionFailed      = "execution_failed"
-	ReasonOutputFilter         = "output_filter"
-	ReasonInternal             = "internal"
-	ReasonContextCanceled      = "context_canceled"
+	ReasonUnauthenticated     = "unauthenticated"
+	ReasonInvalidDelegation   = "invalid_delegation"
+	ReasonBoundaryViolation   = "boundary_violation"
+	ReasonOperationDenied     = "operation_denied"
+	ReasonResourceDenied      = "resource_denied"
+	ReasonFieldDenied         = "field_denied"
+	ReasonPolicyDeny          = "policy_deny"
+	ReasonPolicyError         = "policy_error" // fail-closed: eval error == deny
+	ReasonGuardrail           = "guardrail"
+	ReasonRiskBlocked         = "risk_blocked"
+	ReasonApprovalRequired    = "approval_required"
+	ReasonApprovalDenied      = "approval_denied"
+	ReasonQuotaExceeded       = "quota_exceeded"
+	ReasonIdempotencyConflict = "idempotency_conflict"
+	ReasonSchemaInvalid       = "schema_invalid"
+	ReasonOperationUnknown    = "operation_unknown"
+	ReasonHandlerMissing      = "handler_missing"
+	ReasonExecutionFailed     = "execution_failed"
+	ReasonOutputFilter        = "output_filter"
+	ReasonInternal            = "internal"
+	ReasonContextCanceled     = "context_canceled"
+	ReasonExecutedUnconfirmed = "executed_unconfirmed"
 )
 
 // Denial is a structured, auditable rejection. It is never an "error to ignore".
@@ -141,6 +160,7 @@ var reasonTable = map[string]reasonInfo{
 	ReasonOutputFilter:        {"output filtering failed", "contact an administrator; no data was returned", false},
 	ReasonInternal:            {"internal error", "retry later; if persistent, contact an administrator", true},
 	ReasonContextCanceled:     {"request canceled or deadline exceeded", "retry if the operation is still needed", true},
+	ReasonExecutedUnconfirmed: {"execution may have completed but could not be confirmed", "query execution status using the execution_id before retrying", false},
 }
 
 // ReasonInfoFor returns the static caller-safe info for a deny reason.
@@ -187,9 +207,9 @@ func AsDenial(err error) (*Denial, bool) {
 
 // Sentinel errors for non-policy failures (still fail-closed at runtime).
 var (
-	ErrNotFound         = errors.New("loom: not found")
-	ErrAlreadyExists    = errors.New("loom: already exists")
-	ErrInvalidArgument  = errors.New("loom: invalid argument")
-	ErrNotImplemented   = errors.New("loom: not implemented")
-	ErrUnavailable      = errors.New("loom: unavailable")
+	ErrNotFound        = errors.New("loom: not found")
+	ErrAlreadyExists   = errors.New("loom: already exists")
+	ErrInvalidArgument = errors.New("loom: invalid argument")
+	ErrNotImplemented  = errors.New("loom: not implemented")
+	ErrUnavailable     = errors.New("loom: unavailable")
 )

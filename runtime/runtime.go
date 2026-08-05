@@ -36,22 +36,33 @@ type TenantResolver interface {
 	Resolve(context.Context, core.Identity, core.BoundaryID) (core.BoundaryID, error)
 }
 
+// Mode controls whether process-local security state may be used.
+type Mode string
+
+const (
+	ModeDevelopment Mode = "development"
+	ModeTest        Mode = "test"
+	ModeProduction  Mode = "production"
+)
+
 type Dependencies struct {
-	Registry    *core.Registry
-	Verifier    identity.Verifier
-	Delegation  identity.DelegationValidator // optional; required only if request has delegation
-	Boundary    boundary.Checker
-	Policy      policy.Engine
-	Resources   resource.Checker
-	Fields      *resource.FieldFilter
-	Guardrails  *guardrails.Chain
-	Risk        risk.Engine
-	RiskBlock   *risk.Blocker // optional hard risk ceiling
-	Approval    approval.Engine
-	Quotas      quotas.Limiter
-	Idempotency idempotency.Store
-	Audit       *audit.Logger
-	Observer    Observer
+	Mode                Mode
+	Registry            *core.Registry
+	Verifier            identity.Verifier
+	Delegation          identity.DelegationValidator // optional; required only if request has delegation
+	Boundary            boundary.Checker
+	Policy              policy.Engine
+	Resources           resource.Checker
+	Fields              *resource.FieldFilter
+	Guardrails          *guardrails.Chain
+	Risk                risk.Engine
+	RiskBlock           *risk.Blocker // optional hard risk ceiling
+	Approval            approval.Engine
+	Quotas              quotas.Limiter
+	Idempotency         idempotency.Store
+	IdempotencyRecovery idempotency.RecoveryQueue
+	Audit               *audit.Logger
+	Observer            Observer
 
 	// AllowAnonymous is false by default. If true, empty credentials get a synthetic
 	// unauthenticated identity that still must pass policy (almost always deny).
@@ -86,9 +97,26 @@ func New(deps Dependencies) (*Runtime, error) {
 	if deps.Resources == nil {
 		return nil, fmt.Errorf("%w: resource checker required", core.ErrInvalidArgument)
 	}
+	if deps.Mode == ModeProduction {
+		if deps.Approval == nil || !durable(deps.Approval) {
+			return nil, fmt.Errorf("%w: production requires durable approval state", core.ErrInvalidArgument)
+		}
+		if deps.Quotas == nil || !durable(deps.Quotas) {
+			return nil, fmt.Errorf("%w: production requires durable quota state", core.ErrInvalidArgument)
+		}
+		if deps.Idempotency == nil || !durable(deps.Idempotency) {
+			return nil, fmt.Errorf("%w: production requires durable idempotency state", core.ErrInvalidArgument)
+		}
+		if deps.Audit == nil || deps.Audit.Sink == nil || !durable(deps.Audit.Sink) {
+			return nil, fmt.Errorf("%w: production requires durable audit state", core.ErrInvalidArgument)
+		}
+	}
 	if deps.Fields == nil {
 		// Fail closed field filter: strip all.
 		deps.Fields = resource.NewFieldFilter()
+	}
+	if deps.Mode == ModeProduction && deps.Guardrails != nil && deps.Guardrails.Len() == 0 {
+		return nil, fmt.Errorf("%w: production requires a non-empty guardrail chain", core.ErrInvalidArgument)
 	}
 	if deps.Guardrails == nil {
 		deps.Guardrails = guardrails.DefaultChain()
@@ -114,8 +142,26 @@ func New(deps Dependencies) (*Runtime, error) {
 	return &Runtime{deps: deps}, nil
 }
 
+func durable(value any) bool {
+	d, ok := value.(interface{ Durable() bool })
+	return ok && d.Durable()
+}
+
 // Execute runs the full permission pipeline. Never panics out; recovers to deny.
 func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Response) {
+	executionID := core.NewTraceID()
+	defer func() {
+		if resp.ExecutionID == "" {
+			resp.ExecutionID = executionID
+		}
+		if resp.Outcome == "" {
+			if resp.Allowed {
+				resp.Outcome = core.OutcomeAllowed
+			} else {
+				resp.Outcome = core.OutcomeDenied
+			}
+		}
+	}()
 	var start time.Time
 	defer func() {
 		defer func() { _ = recover() }()
@@ -200,13 +246,19 @@ func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Res
 		req.Boundary = resolved
 	}
 
+	if req.BoundaryContext != nil {
+		if !req.BoundaryContext.Valid() || req.BoundaryContext.ID != req.Boundary {
+			return rt.deny(ctx, req, id, nil, core.RiskLow, "boundary", core.ReasonBoundaryViolation, "structured boundary does not match boundary id", start, "")
+		}
+	}
+
 	// 3. Boundary
 	if err := rt.deps.Boundary.Allow(ctx, id, req.Boundary); err != nil {
 		return rt.deny(ctx, req, id, nil, core.RiskLow, "boundary", core.ReasonBoundaryViolation, err.Error(), start, "")
 	}
 
 	// Resolve operation — unknown ⇒ deny
-	op, err := rt.deps.Registry.Get(req.Operation)
+	op, err := rt.deps.Registry.GetVersion(req.Operation, req.OperationVersion)
 	if err != nil {
 		return rt.deny(ctx, req, id, nil, core.RiskLow, "operation", core.ReasonOperationUnknown, err.Error(), start, "")
 	}
@@ -230,6 +282,14 @@ func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Res
 	// we still allow execution but may return empty output — adversarial: better than leaking.
 	// (No early deny here to avoid resource existence oracle unless policy wants it.)
 
+	// 6. Input field permission. A structurally valid field is not necessarily
+	// writable by this caller (for example tenant_id, role, or credit_limit).
+	if rt.deps.Fields.HasInputGrant(id, req.Boundary, op.Name) {
+		if err := rt.deps.Fields.AuthorizeInput(id, req.Boundary, op.Name, op.SensitiveFields, req.Input); err != nil {
+			return rt.deny(ctx, req, id, op, core.RiskLow, "input_fields", core.ReasonFieldDenied, err.Error(), start, "")
+		}
+	}
+
 	// 7. Contextual policy
 	cdec := rt.deps.Policy.EvaluateContextual(ctx, id, req.Boundary, op, &req)
 	if !cdec.Decision.Allowed() {
@@ -241,6 +301,9 @@ func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Res
 	}
 
 	// 8. Guardrails
+	if err := rt.deps.Guardrails.ValidateOperation(op); err != nil {
+		return rt.deny(ctx, req, id, op, core.RiskLow, "guardrails", core.ReasonGuardrail, err.Error(), start, "")
+	}
 	gr := rt.deps.Guardrails.Check(ctx, id, op, &req)
 	if !gr.OK {
 		return rt.deny(ctx, req, id, op, core.RiskLow, "guardrails:"+gr.Name, core.ReasonGuardrail, gr.Message, start, "")
@@ -271,7 +334,7 @@ func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Res
 			return rt.deny(ctx, req, id, op, riskLevel, "idempotency", core.ReasonInternal, err.Error(), start, "")
 		}
 		idemFP = fp
-		idemKey = idempotency.CompositeKey(id.ID, req.Boundary, op.Name, req.IdempotencyKey)
+		idemKey = idempotency.CompositeKeyVersioned(id.ID, req.Boundary, op.Name, op.Version, req.IdempotencyKey)
 		if stored, ok, err := rt.deps.Idempotency.Get(ctx, idemKey); err != nil {
 			return rt.deny(ctx, req, id, op, riskLevel, "idempotency", core.ReasonInternal, err.Error(), start, "")
 		} else if ok {
@@ -282,7 +345,7 @@ func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Res
 			replay.IdempotentReplay = true
 			replay.TraceID = req.TraceID
 			// Fail closed: an audit emit error converts the replay into a deny.
-			auditID, aerr := rt.audit(ctx, req, id, op, riskLevel, core.DecisionAllow, "idempotency", "allow", "idempotent replay", start, replay.AuditID)
+			auditID, aerr := rt.audit(ctx, req, id, op, riskLevel, core.DecisionAllow, "idempotency", "allow", "idempotent replay", start, replay.AuditID, executionID)
 			if aerr != nil {
 				log.Printf("loom: audit emit failed on replay path (failing closed): %v", aerr)
 				return rt.deny(ctx, req, id, op, riskLevel, "audit", core.ReasonInternal, "audit emit failed: "+aerr.Error(), start, "")
@@ -343,14 +406,15 @@ func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Res
 		return rt.deny(ctx, req, id, op, riskLevel, "execute", core.ReasonHandlerMissing, err.Error(), start, "")
 	}
 	ec := &core.ExecutionContext{
-		Ctx:       ctx,
-		Identity:  id,
-		Boundary:  req.Boundary,
-		Operation: op,
-		Resource:  req.Resource,
-		Input:     req.Input,
-		TraceID:   req.TraceID,
-		Risk:      riskLevel,
+		Ctx:             ctx,
+		Identity:        id,
+		Boundary:        req.Boundary,
+		BoundaryContext: req.BoundaryContext,
+		Operation:       op,
+		Resource:        req.Resource,
+		Input:           req.Input,
+		TraceID:         req.TraceID,
+		Risk:            riskLevel,
 	}
 	// Fail closed if the context was canceled while the gates ran (before side effects).
 	if err := ctx.Err(); err != nil {
@@ -363,7 +427,7 @@ func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Res
 	if err != nil {
 		// Execution failed: refund the quota charged above so failing handlers
 		// do not drain quota. Approval is already burned (fail closed).
-		if quotaCharged {
+		if quotaCharged && op.Quota.RefundOnHandlerError {
 			rt.refundQuota(ctx, id, req.Boundary, op.Name)
 		}
 		return rt.deny(ctx, req, id, op, riskLevel, "execute", core.ReasonExecutionFailed, err.Error(), start, "")
@@ -372,11 +436,16 @@ func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Res
 		result = &core.Result{Output: map[string]any{}}
 	}
 
-	// 14. Filter output (field authz + secrets)
+	// 14. Validate and filter output. A declared output contract is mandatory
+	// when present; malformed or unexpected handler output is never returned.
+	if len(op.OutputSchema) > 0 {
+		if err := guardrails.ValidateSchema(op.OutputSchema, result.Output); err != nil {
+			return rt.deny(ctx, req, id, op, riskLevel, "output_schema", core.ReasonOutputFilter, err.Error(), start, "")
+		}
+	}
 	filtered, err := rt.deps.Fields.Filter(id, req.Boundary, op.Name, req.Fields, op.SensitiveFields, result.Output)
 	if err != nil {
-		// Fail closed: empty output rather than leak
-		filtered = map[string]any{}
+		return rt.deny(ctx, req, id, op, riskLevel, "output_filter", core.ReasonOutputFilter, err.Error(), start, "")
 	}
 	filtered = guardrails.RedactSecretPatterns(filtered)
 
@@ -384,7 +453,7 @@ func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Res
 	// deny (ReasonInternal, no output; the handler's side effects already
 	// happened — that is the documented fail-closed trade-off). Approval is
 	// already burned so a retry cannot double-execute.
-	auditID, aerr := rt.audit(ctx, req, id, op, riskLevel, core.DecisionAllow, "execute", "allow", "execution succeeded", start, "")
+	auditID, aerr := rt.audit(ctx, req, id, op, riskLevel, core.DecisionAllow, "execute", "allow", "execution succeeded", start, "", executionID)
 	if aerr != nil {
 		log.Printf("loom: audit emit failed on allow path (failing closed): %v", aerr)
 		// Do not Abort idempotency after successful handler — prevents a second side effect.
@@ -392,16 +461,26 @@ func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Res
 			// Best-effort: leave key in-flight so parallel retries conflict.
 			idemBegin = false
 		}
-		return rt.deny(ctx, req, id, op, riskLevel, "audit", core.ReasonInternal, "audit emit failed: "+aerr.Error(), start, "")
+		return core.Response{
+			Allowed:     false,
+			Outcome:     core.OutcomeExecutedUnconfirmed,
+			ExecutionID: executionID,
+			Decision:    core.DecisionDeny,
+			Denial:      core.SafeDenial("audit", core.ReasonExecutedUnconfirmed),
+			TraceID:     req.TraceID,
+			Risk:        riskLevel,
+		}
 	}
 
 	resp = core.Response{
-		Allowed:  true,
-		Decision: core.DecisionAllow,
-		Output:   filtered,
-		TraceID:  req.TraceID,
-		AuditID:  auditID,
-		Risk:     riskLevel,
+		Allowed:     true,
+		Outcome:     core.OutcomeAllowed,
+		ExecutionID: executionID,
+		Decision:    core.DecisionAllow,
+		Output:      filtered,
+		TraceID:     req.TraceID,
+		AuditID:     auditID,
+		Risk:        riskLevel,
 	}
 
 	// Complete idempotency. On failure: log loudly, do NOT Abort (would enable
@@ -411,13 +490,26 @@ func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Res
 		if op.Idempotency.TTLSeconds > 0 {
 			ttl = time.Duration(op.Idempotency.TTLSeconds) * time.Second
 		}
-		if err := rt.deps.Idempotency.Complete(ctx, idemKey, &idempotency.Stored{
+		stored := &idempotency.Stored{
 			Fingerprint: idemFP,
 			Response:    resp,
 			StoredAt:    rt.deps.Clock(),
 			ExpiresAt:   rt.deps.Clock().Add(ttl),
-		}); err != nil {
+		}
+		if err := rt.deps.Idempotency.Complete(ctx, idemKey, stored); err != nil {
+			resp.ReliabilityWarning = "idempotency_completion_pending"
 			log.Printf("loom: CRITICAL idempotency complete failed (key held in-flight): %v", err)
+			if rt.deps.IdempotencyRecovery != nil {
+				if qerr := rt.deps.IdempotencyRecovery.Enqueue(ctx, idempotency.RecoveryRecord{
+					ExecutionID: executionID,
+					Key:         idemKey,
+					Fingerprint: idemFP,
+					Response:    resp,
+					CreatedAt:   rt.deps.Clock(),
+				}); qerr != nil {
+					log.Printf("loom: CRITICAL idempotency recovery enqueue failed: %v", qerr)
+				}
+			}
 		}
 		idemBegin = false
 	}
@@ -453,7 +545,7 @@ func (rt *Runtime) deny(
 	denial := core.SafeDenial(step, reason)
 	// The response is already a deny, so an audit emit error changes nothing
 	// for the caller — but it must be logged, not silently dropped.
-	auditID, aerr := rt.audit(ctx, req, id, op, riskLevel, core.DecisionDeny, step, reason, message, start, priorAudit)
+	auditID, aerr := rt.audit(ctx, req, id, op, riskLevel, core.DecisionDeny, step, reason, message, start, priorAudit, "")
 	if aerr != nil {
 		log.Printf("loom: audit emit failed on deny path: %v", aerr)
 	}
@@ -478,6 +570,7 @@ func (rt *Runtime) audit(
 	step, reason, message string,
 	start time.Time,
 	priorAudit string,
+	executionID string,
 ) (string, error) {
 	opName := req.Operation
 	if op != nil {
@@ -487,24 +580,43 @@ func (rt *Runtime) audit(
 	if req.Resource != nil {
 		res = req.Resource.String()
 	}
+	boundaryType, parentType, parentID := "", "", ""
+	tenantID := ""
+	if id.Attributes != nil {
+		tenantID = id.Attributes["tenant_id"]
+	}
+	if req.BoundaryContext != nil {
+		boundaryType = req.BoundaryContext.Type
+		parentType = req.BoundaryContext.ParentType
+		parentID = string(req.BoundaryContext.ParentID)
+		if tenantID == "" && req.BoundaryContext.Type == "tenant" {
+			tenantID = string(req.BoundaryContext.ID)
+		}
+	}
 	var durMS int64
 	if !start.IsZero() {
 		durMS = rt.deps.Clock().Sub(start).Milliseconds()
 	}
 	ev := audit.Event{
-		TraceID:    req.TraceID,
-		Decision:   decision.String(),
-		Reason:     reason,
-		Step:       step,
-		Message:    message,
-		Principal:  string(id.ID),
-		Delegator:  string(id.Delegator),
-		Boundary:   string(req.Boundary),
-		TenantID:   string(req.Boundary),
-		Operation:  opName,
-		Resource:   res,
-		Risk:       riskLevel.String(),
-		Input:      req.Input,
+		ExecutionID:        executionID,
+		TraceID:            req.TraceID,
+		Decision:           decision.String(),
+		Reason:             reason,
+		Step:               step,
+		Message:            message,
+		Principal:          string(id.ID),
+		Delegator:          string(id.Delegator),
+		Boundary:           string(req.Boundary),
+		BoundaryType:       boundaryType,
+		BoundaryParentType: parentType,
+		BoundaryParentID:   parentID,
+		TenantID:           tenantID,
+		Operation:          opName,
+		Resource:           res,
+		Risk:               riskLevel.String(),
+		// Redact at the runtime boundary as well as inside the logger. A custom
+		// audit sink must never receive unrestricted request input.
+		Input:      guardrails.RedactSecrets(req.Input),
 		Metadata:   req.Metadata,
 		DurationMS: durMS,
 		AuthMethod: id.AuthMethod,

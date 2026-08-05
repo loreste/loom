@@ -45,6 +45,9 @@ func (a *App) GrantDBAccess(g DBAccess) error {
 			[]string{"pool", "columns", "rows", "count", "truncated"}); err != nil {
 			return err
 		}
+		if err := a.AllowInputFields(g.Principal, g.Boundary, "db.query", []string{"pool", "sql", "args"}); err != nil {
+			return err
+		}
 	}
 	if g.Exec {
 		ops = append(ops, "db.exec")
@@ -55,6 +58,9 @@ func (a *App) GrantDBAccess(g DBAccess) error {
 		}
 		if err := a.AllowFields(g.Principal, g.Boundary, "db.exec",
 			[]string{"pool", "rows_affected", "status"}); err != nil {
+			return err
+		}
+		if err := a.AllowInputFields(g.Principal, g.Boundary, "db.exec", []string{"pool", "sql", "args"}); err != nil {
 			return err
 		}
 	}

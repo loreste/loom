@@ -8,6 +8,7 @@
 // Auth: bearer token from:
 //  1. JSON-RPC params._meta.authorization / params.bearer_token (tools/call)
 //  2. Server.Token (stdio / process env LOOM_TOKEN)
+//
 // Tokens in JSON-RPC params are accepted for stdio transports that cannot set
 // HTTP headers; prefer Server.Token for long-lived processes.
 package mcp
@@ -203,8 +204,9 @@ func (s *Server) handleToolsList(ctx context.Context, params json.RawMessage) (a
 }
 
 type toolsCallParams struct {
-	Name      string         `json:"name"`
-	Arguments map[string]any `json:"arguments"`
+	Name             string         `json:"name"`
+	OperationVersion string         `json:"operation_version,omitempty"`
+	Arguments        map[string]any `json:"arguments"`
 	// Loom extensions (optional).
 	BearerToken    string            `json:"bearer_token,omitempty"`
 	Boundary       string            `json:"boundary,omitempty"`
@@ -264,13 +266,14 @@ func (s *Server) handleToolsCall(ctx context.Context, params json.RawMessage) (a
 		boundary = s.Boundary
 	}
 	resp, err := s.Adapter.Call(ctx, ToolCall{
-		Name:           p.Name,
-		Arguments:      p.Arguments,
-		BearerToken:    token,
-		Boundary:       boundary,
-		IdempotencyKey: p.IdempotencyKey,
-		ApprovalToken:  p.ApprovalToken,
-		Resource:       p.Resource,
+		Name:             p.Name,
+		OperationVersion: p.OperationVersion,
+		Arguments:        p.Arguments,
+		BearerToken:      token,
+		Boundary:         boundary,
+		IdempotencyKey:   p.IdempotencyKey,
+		ApprovalToken:    p.ApprovalToken,
+		Resource:         p.Resource,
 	})
 	if err != nil {
 		return nil, &rpcError{Code: rpcInternalError, Message: "call failed"}

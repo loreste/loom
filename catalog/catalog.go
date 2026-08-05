@@ -14,6 +14,7 @@ import (
 // Sensitive field names are never exposed — only a presence flag.
 type ToolSpec struct {
 	Name        string          `json:"name"`
+	Version     string          `json:"version"`
 	Description string          `json:"description,omitempty"`
 	InputSchema json.RawMessage `json:"input_schema,omitempty"`
 	// OutputSchema when declared lets agents plan result parsing.
@@ -38,6 +39,7 @@ func SpecOf(op *core.Operation) ToolSpec {
 	}
 	spec := ToolSpec{
 		Name:        op.Name,
+		Version:     core.NormalizeOperationVersion(op.Version),
 		Description: op.Description,
 		Risk:        op.Risk.String(),
 	}
@@ -112,11 +114,11 @@ type AuthInfo struct {
 // Manifest is the static discovery document served at a well-known path.
 // It contains no operation names and no per-caller data.
 type Manifest struct {
-	Service          string   `json:"service"`
-	Version          string   `json:"version"`
-	Description      string   `json:"description,omitempty"`
-	ExecuteEndpoint  string   `json:"execute_endpoint"`
-	CatalogOperation string   `json:"catalog_operation"`
+	Service          string `json:"service"`
+	Version          string `json:"version"`
+	Description      string `json:"description,omitempty"`
+	ExecuteEndpoint  string `json:"execute_endpoint"`
+	CatalogOperation string `json:"catalog_operation"`
 	// MCPEndpoint is the JSON-RPC tools/* wire path when the HTTP edge exposes it.
 	MCPEndpoint string `json:"mcp_endpoint,omitempty"`
 	// OpenAPIEndpoint is the capability-filtered OpenAPI document path.

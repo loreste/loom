@@ -59,15 +59,16 @@ func NewHTTPClient(baseURL, token string) *HTTPClient {
 }
 
 type executeBody struct {
-	Operation      string                `json:"operation"`
-	Boundary       string                `json:"boundary"`
-	Input          map[string]any        `json:"input"`
-	Fields         []string              `json:"fields,omitempty"`
-	IdempotencyKey string                `json:"idempotency_key,omitempty"`
-	ApprovalToken  string                `json:"approval_token,omitempty"`
-	Resource       *core.ResourceRef     `json:"resource,omitempty"`
-	Metadata       map[string]string     `json:"metadata,omitempty"`
-	Delegation     *core.DelegationChain `json:"delegation,omitempty"`
+	Operation        string                `json:"operation"`
+	OperationVersion string                `json:"operation_version,omitempty"`
+	Boundary         string                `json:"boundary"`
+	Input            map[string]any        `json:"input"`
+	Fields           []string              `json:"fields,omitempty"`
+	IdempotencyKey   string                `json:"idempotency_key,omitempty"`
+	ApprovalToken    string                `json:"approval_token,omitempty"`
+	Resource         *core.ResourceRef     `json:"resource,omitempty"`
+	Metadata         map[string]string     `json:"metadata,omitempty"`
+	Delegation       *core.DelegationChain `json:"delegation,omitempty"`
 }
 
 // Call posts to /v1/execute.
@@ -80,15 +81,16 @@ func (c *HTTPClient) Call(ctx context.Context, req core.Request) (core.Response,
 		token = c.Token
 	}
 	body := executeBody{
-		Operation:      req.Operation,
-		Boundary:       string(req.Boundary),
-		Input:          req.Input,
-		Fields:         req.Fields,
-		IdempotencyKey: req.IdempotencyKey,
-		ApprovalToken:  req.ApprovalToken,
-		Resource:       req.Resource,
-		Metadata:       req.Metadata,
-		Delegation:     req.Delegation,
+		Operation:        req.Operation,
+		OperationVersion: req.OperationVersion,
+		Boundary:         string(req.Boundary),
+		Input:            req.Input,
+		Fields:           req.Fields,
+		IdempotencyKey:   req.IdempotencyKey,
+		ApprovalToken:    req.ApprovalToken,
+		Resource:         req.Resource,
+		Metadata:         req.Metadata,
+		Delegation:       req.Delegation,
 	}
 	if body.Metadata == nil {
 		body.Metadata = map[string]string{}

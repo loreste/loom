@@ -11,6 +11,7 @@ import (
 
 	"github.com/loreste/loom/approval"
 	"github.com/loreste/loom/audit"
+	"github.com/loreste/loom/boundary"
 	"github.com/loreste/loom/core"
 	"github.com/loreste/loom/identity"
 	"github.com/loreste/loom/policy"
@@ -19,6 +20,20 @@ import (
 	"github.com/loreste/loom/risk"
 	"github.com/loreste/loom/runtime"
 )
+
+func TestProductionModeRejectsImplicitStateStores(t *testing.T) {
+	_, err := runtime.New(runtime.Dependencies{
+		Mode:      runtime.ModeProduction,
+		Registry:  core.NewRegistry(),
+		Verifier:  identity.NewMemoryVerifier(),
+		Boundary:  boundary.NewMemoryChecker(),
+		Policy:    policy.NewMemoryEngine(),
+		Resources: resource.NewMemoryChecker(),
+	})
+	if err == nil {
+		t.Fatal("production runtime must reject implicit in-memory security stores")
+	}
+}
 
 // stackWith rebuilds a Runtime over an existing TestStack with selected
 // dependencies swapped out (fault injection).
@@ -104,6 +119,7 @@ func TestApprovalBurnedOnHandlerFailureButQuotaRefunded(t *testing.T) {
 		Name:        "payment.failable",
 		Permissions: []string{"payment.capture"},
 		Risk:        core.RiskHigh,
+		Quota:       core.QuotaPolicy{RefundOnHandlerError: true},
 		Approval:    core.ApprovalPolicy{Required: true},
 	}, func(ec *core.ExecutionContext) (*core.Result, error) {
 		if ec.Input["fail"] == true {
@@ -282,8 +298,11 @@ func TestAuditFailureOnAllowFailsClosed(t *testing.T) {
 	if resp.Allowed {
 		t.Fatal("audit failure on allow path must deny")
 	}
-	if resp.Denial == nil || resp.Denial.Reason != core.ReasonInternal {
-		t.Fatalf("expected internal reason, got %+v", resp.Denial)
+	if resp.Denial == nil || resp.Denial.Reason != core.ReasonExecutedUnconfirmed {
+		t.Fatalf("expected executed-unconfirmed reason, got %+v", resp.Denial)
+	}
+	if resp.Outcome != core.OutcomeExecutedUnconfirmed || resp.ExecutionID == "" {
+		t.Fatalf("expected explicit indeterminate outcome and execution id, got %+v", resp)
 	}
 	if resp.Output != nil {
 		t.Fatalf("output must not be returned when audit fails: %v", resp.Output)
@@ -301,6 +320,33 @@ func TestAuditFailureOnAllowFailsClosed(t *testing.T) {
 	resp = rt.Execute(context.Background(), req)
 	if !resp.Allowed {
 		t.Fatalf("fresh key must succeed: %+v", resp.Denial)
+	}
+}
+
+func TestOutputSchemaFailureReturnsNoData(t *testing.T) {
+	s := setupGranted(t)
+	if err := s.Policy.AddRule(policy.Rule{Principal: "user:alice", Boundary: "dev", Operation: "contract.read", Priority: 10}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Fields.GrantFields("user:alice", "dev", "contract.read", []string{"id", "unexpected"}); err != nil {
+		t.Fatal(err)
+	}
+	s.Registry.MustRegister(&core.Operation{
+		Name:         "contract.read",
+		InputSchema:  []byte(`{"type":"object","properties":{"id":{"type":"string"}},"required":["id"],"additionalProperties":false}`),
+		OutputSchema: []byte(`{"type":"object","properties":{"id":{"type":"string"}},"required":["id"],"additionalProperties":false}`),
+		Effects:      []core.Effect{core.EffectRead},
+	}, func(*core.ExecutionContext) (*core.Result, error) {
+		return &core.Result{Output: map[string]any{"id": "ok", "unexpected": "must not escape"}}, nil
+	})
+	resp := s.Runtime.Execute(context.Background(), core.Request{
+		Operation:   "contract.read",
+		Credentials: core.Credentials{Scheme: "bearer", Token: "tok-alice"},
+		Boundary:    "dev",
+		Input:       map[string]any{"id": "x"},
+	})
+	if resp.Allowed || resp.Output != nil || resp.Denial == nil || resp.Denial.Reason != core.ReasonOutputFilter {
+		t.Fatalf("invalid output must deny without data: %+v", resp)
 	}
 }
 

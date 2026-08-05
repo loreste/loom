@@ -45,3 +45,19 @@ func TestFieldFilterConcurrentGrantAndFilter(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestInputFieldsAreSeparateFromOutputFields(t *testing.T) {
+	f := resource.NewFieldFilter()
+	if err := f.GrantFields("user:alice", "dev", "customer.update", []string{"id", "name"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.AuthorizeInput(core.Identity{ID: "user:alice"}, "dev", "customer.update", nil, map[string]any{"name": "A"}); err == nil {
+		t.Fatal("output grant must not authorize input")
+	}
+	if err := f.GrantInputFields("user:alice", "dev", "customer.update", []string{"name"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.AuthorizeInput(core.Identity{ID: "user:alice"}, "dev", "customer.update", nil, map[string]any{"role": "admin"}); err == nil {
+		t.Fatal("unlisted input field must be denied")
+	}
+}

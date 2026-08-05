@@ -12,6 +12,18 @@ type PrincipalID string
 // BoundaryID isolates tenants/environments/workspaces.
 type BoundaryID string
 
+// Boundary describes one isolation dimension. Tenant, project, environment,
+// region, and security domain are represented as data rather than overloaded
+// into one opaque string.
+type Boundary struct {
+	Type       string     `json:"type"`
+	ID         BoundaryID `json:"id"`
+	ParentType string     `json:"parent_type,omitempty"`
+	ParentID   BoundaryID `json:"parent_id,omitempty"`
+}
+
+func (b Boundary) Valid() bool { return b.Type != "" && b.ID != "" }
+
 // ResourceRef names a concrete resource subject to resource-level authz.
 type ResourceRef struct {
 	Type string // e.g. "document", "payment", "server"
@@ -61,6 +73,9 @@ type DelegationChain struct {
 type Request struct {
 	// Operation name, e.g. "document.read".
 	Operation string
+	// OperationVersion binds this request to an exact registered contract.
+	// Empty selects DefaultOperationVersion.
+	OperationVersion string
 
 	// Credentials for authentication. Optional only if verifier accepts anonymous (default: no).
 	Credentials Credentials
@@ -70,6 +85,9 @@ type Request struct {
 
 	// Boundary claimed by caller. Must match verified membership or deny.
 	Boundary BoundaryID
+	// BoundaryContext is the structured form of Boundary. When set, its ID
+	// must match Boundary.
+	BoundaryContext *Boundary
 
 	// Resource primary subject, if any.
 	Resource *ResourceRef
@@ -117,13 +135,14 @@ type Identity struct {
 // ExecutionContext is the fully authorized context handed to business logic.
 // Handlers must not re-parse untrusted credentials; use only this.
 type ExecutionContext struct {
-	Ctx      context.Context
-	Identity Identity
-	Boundary BoundaryID
-	Operation *Operation
-	Resource  *ResourceRef
-	Input     map[string]any
-	TraceID   string
+	Ctx             context.Context
+	Identity        Identity
+	Boundary        BoundaryID
+	BoundaryContext *Boundary
+	Operation       *Operation
+	Resource        *ResourceRef
+	Input           map[string]any
+	TraceID         string
 	// Risk is the evaluated risk level after the risk engine ran.
 	Risk RiskLevel
 }
@@ -140,6 +159,12 @@ type Result struct {
 type Response struct {
 	// Allowed is true only if execution completed successfully under policy.
 	Allowed bool
+	// Outcome is the caller-safe execution status. ExecutedUnconfirmed means
+	// the handler may have produced a side effect but post-execution recording
+	// failed; callers must check status before retrying.
+	Outcome Outcome
+	// ExecutionID identifies this execution attempt for reconciliation.
+	ExecutionID string
 	// Decision is allow/deny/require_approval.
 	Decision Decision
 	// Denial populated when not allowed.
@@ -154,4 +179,7 @@ type Response struct {
 	IdempotentReplay bool
 	// Risk evaluated.
 	Risk RiskLevel
+	// ReliabilityWarning is set when execution succeeded but a durable
+	// completion record still needs reconciliation.
+	ReliabilityWarning string
 }

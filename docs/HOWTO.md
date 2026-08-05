@@ -8,6 +8,7 @@ behavior visible.
 ```go
 op := &core.Operation{
     Name:        "invoice.read",
+    Version:     "1",
     Permissions: []string{"invoice.read"},
     Resources:   []string{"invoice"},
     Effects:     []core.Effect{core.EffectRead},
@@ -31,6 +32,7 @@ _ = a.AllowResource(resource.Rule{
     Operations: []string{"invoice.read"},
 })
 _ = a.AllowFields(principal, boundary, "invoice.read", []string{"id"})
+_ = a.AllowInputFields(principal, boundary, "invoice.read", []string{"id"})
 ```
 
 Call it through the single entrypoint:
@@ -38,6 +40,7 @@ Call it through the single entrypoint:
 ```go
 resp := a.Call(ctx, core.Request{
     Operation: "invoice.read",
+    OperationVersion: "1",
     Credentials: core.Credentials{Scheme: "bearer", Token: token},
     Boundary: boundary,
     Resource: &core.ResourceRef{Type: "invoice", ID: invoiceID},
@@ -46,9 +49,38 @@ resp := a.Call(ctx, core.Request{
 if !resp.Allowed {
     return fmt.Errorf("invoice read denied: %s", resp.Denial.Reason)
 }
+
+// For a side-effecting operation, an executed_unconfirmed outcome means the
+// handler may have run. Check status/reconciliation using resp.ExecutionID
+// before retrying; do not treat it as an ordinary safe denial.
+if resp.Outcome == core.OutcomeExecutedUnconfirmed {
+    log.Printf("reconcile execution %s before retry", resp.ExecutionID)
+}
 ```
 
 ## Govern database access
+
+## Schema and financial inputs
+
+Loom validates a declared `OutputSchema` after the handler returns. The
+supported Loom Schema subset is documented in the guardrails package and
+rejects unsupported keywords rather than silently ignoring them. Use nested
+`items`, `properties`, `required`, `additionalProperties`, enums/constants,
+length and range constraints, and declare only the keywords Loom supports.
+
+Money operations must use `core.Money` limits and include a three-letter
+currency. Do not compare payment amounts as `float64`; handlers should call
+`core.ParseMoney` and compare exact values.
+
+Input field grants are separate from output projection grants:
+
+```go
+_ = a.AllowFields(principal, boundary, "customer.update", []string{"id", "name"})
+_ = a.AllowInputFields(principal, boundary, "customer.update", []string{"name"})
+```
+
+This allows a caller to read a field without implicitly allowing it to change
+that field.
 
 Prefer domain operations with fixed SQL. If a controlled administrative tool
 needs SQL, register a pool with an allowlist, enable `db.query` or `db.exec`,

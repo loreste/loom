@@ -159,23 +159,33 @@ func New(cfg Config) (*App, error) {
 	metrics := runtime.NewMetrics()
 	// SQL-bearing ops get schema + secrets; database package enforces SQL class.
 
+	mode := runtime.ModeDevelopment
+	if production || cfg.RequireDurableSecurityState {
+		mode = runtime.ModeProduction
+	}
+	var recovery idempotency.RecoveryQueue
+	if q, ok := idempotencyStore.(idempotency.RecoveryQueue); ok {
+		recovery = q
+	}
 	rt, err := runtime.New(runtime.Dependencies{
-		Registry:       reg,
-		Verifier:       verifier,
-		Boundary:       boundaryChecker,
-		Policy:         policyEngine,
-		Resources:      resourceChecker,
-		Fields:         fields,
-		Guardrails:     gr,
-		Risk:           risk.NewSimpleEngine(),
-		RiskBlock:      &risk.Blocker{MaxAllowed: core.RiskCritical},
-		Approval:       approvalEngine,
-		Quotas:         quotaLimiter,
-		Idempotency:    idempotencyStore,
-		Audit:          audit.NewLogger(sink),
-		Observer:       metrics,
-		Tenant:         cfg.TenantResolver,
-		AllowAnonymous: cfg.AllowAnonymous,
+		Mode:                mode,
+		Registry:            reg,
+		Verifier:            verifier,
+		Boundary:            boundaryChecker,
+		Policy:              policyEngine,
+		Resources:           resourceChecker,
+		Fields:              fields,
+		Guardrails:          gr,
+		Risk:                risk.NewSimpleEngine(),
+		RiskBlock:           &risk.Blocker{MaxAllowed: core.RiskCritical},
+		Approval:            approvalEngine,
+		Quotas:              quotaLimiter,
+		Idempotency:         idempotencyStore,
+		IdempotencyRecovery: recovery,
+		Audit:               audit.NewLogger(sink),
+		Observer:            metrics,
+		Tenant:              cfg.TenantResolver,
+		AllowAnonymous:      cfg.AllowAnonymous,
 	})
 	if err != nil {
 		return nil, err
@@ -311,6 +321,12 @@ func (a *App) AllowResource(rule resource.Rule) error {
 // AllowFields grants output fields.
 func (a *App) AllowFields(id core.PrincipalID, b core.BoundaryID, op string, fields []string) error {
 	return a.Fields.GrantFields(id, b, op, fields)
+}
+
+// AllowInputFields grants fields a caller may provide to an operation. Input
+// grants are independent from output projection grants.
+func (a *App) AllowInputFields(id core.PrincipalID, b core.BoundaryID, op string, fields []string) error {
+	return a.Fields.GrantInputFields(id, b, op, fields)
 }
 
 // IssueApproval issues a single-use approval token (tests/admin tooling).

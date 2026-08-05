@@ -138,12 +138,64 @@ func opAllowed(ops []string, name string) bool {
 type FieldFilter struct {
 	mu sync.RWMutex
 	// principal|boundary|operation -> allowed fields; "*" field means all
-	grants map[string]map[string]struct{}
+	grants      map[string]map[string]struct{}
+	inputGrants map[string]map[string]struct{}
 }
 
 // NewFieldFilter denies all fields until granted.
 func NewFieldFilter() *FieldFilter {
-	return &FieldFilter{grants: make(map[string]map[string]struct{})}
+	return &FieldFilter{
+		grants:      make(map[string]map[string]struct{}),
+		inputGrants: make(map[string]map[string]struct{}),
+	}
+}
+
+// HasGrant reports whether field policy has been configured for a caller and
+// operation. Runtime uses this to apply configured field policy to both input
+// and output while preserving operations with no field policy.
+func (f *FieldFilter) HasGrant(id core.Identity, b core.BoundaryID, op string) bool {
+	if f == nil {
+		return false
+	}
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	_, ok := f.grants[fieldKey(id.ID, b, op)]
+	return ok
+}
+
+// GrantInputFields configures the fields a caller may provide to an
+// operation. Input and output policy are separate: read access does not imply
+// write access.
+func (f *FieldFilter) GrantInputFields(id core.PrincipalID, b core.BoundaryID, op string, fields []string) error {
+	if f == nil {
+		return fmt.Errorf("%w: nil filter", core.ErrInvalidArgument)
+	}
+	if id == "" || b == "" || op == "" || len(fields) == 0 {
+		return fmt.Errorf("%w: id, boundary, op, fields required", core.ErrInvalidArgument)
+	}
+	k := fieldKey(id, b, op)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	set := f.inputGrants[k]
+	if set == nil {
+		set = make(map[string]struct{})
+		f.inputGrants[k] = set
+	}
+	for _, field := range fields {
+		set[field] = struct{}{}
+	}
+	return nil
+}
+
+// HasInputGrant reports whether input field policy has been configured.
+func (f *FieldFilter) HasInputGrant(id core.Identity, b core.BoundaryID, op string) bool {
+	if f == nil {
+		return false
+	}
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	_, ok := f.inputGrants[fieldKey(id.ID, b, op)]
+	return ok
 }
 
 func fieldKey(id core.PrincipalID, b core.BoundaryID, op string) string {
@@ -240,4 +292,40 @@ func (f *FieldFilter) Filter(id core.Identity, b core.BoundaryID, op string, req
 		out[k] = v
 	}
 	return out, nil
+}
+
+// AuthorizeInput verifies every top-level input field against the same
+// principal/boundary/operation field grant used for output projection.
+// Input authorization is intentionally strict: a missing grant or an
+// unlisted field is a denial, even when the input schema permits that field.
+// A wildcard grant allows ordinary fields; sensitive fields still require an
+// explicit grant.
+func (f *FieldFilter) AuthorizeInput(id core.Identity, b core.BoundaryID, op string, sensitive []string, input map[string]any) error {
+	if f == nil {
+		return fmt.Errorf("resource: field filter not configured")
+	}
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	grant := f.inputGrants[fieldKey(id.ID, b, op)]
+	if len(input) == 0 {
+		return nil
+	}
+	if grant == nil {
+		return fmt.Errorf("resource: no input field grant")
+	}
+	sensitiveSet := make(map[string]struct{}, len(sensitive))
+	for _, field := range sensitive {
+		sensitiveSet[field] = struct{}{}
+	}
+	for field := range input {
+		_, isSensitive := sensitiveSet[field]
+		if _, explicitlyGranted := grant[field]; explicitlyGranted {
+			continue
+		}
+		if _, wildcard := grant["*"]; wildcard && !isSensitive {
+			continue
+		}
+		return fmt.Errorf("resource: input field %q is not authorized", field)
+	}
+	return nil
 }

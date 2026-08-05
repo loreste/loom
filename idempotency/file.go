@@ -23,6 +23,30 @@ type FileStore struct {
 // Durable reports whether idempotency state survives process restart.
 func (s *FileStore) Durable() bool { return s != nil }
 
+// Enqueue appends a recovery record beside the idempotency store. Operators
+// can replay this JSONL queue with a reconciler that calls Complete.
+func (s *FileStore) Enqueue(ctx context.Context, record RecoveryRecord) error {
+	if s == nil || s.path == "" {
+		return fmt.Errorf("idempotency: recovery store not configured")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	b, err := json.Marshal(record)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	f, err := os.OpenFile(s.path+".recovery.jsonl", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.Write(append(b, '\n'))
+	return err
+}
+
 type fileSnap struct {
 	Entries map[string]*persistedEntry `json:"entries"`
 }

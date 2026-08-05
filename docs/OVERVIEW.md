@@ -1,5 +1,11 @@
 # Why Loom exists
 
+Loom has been used internally for the past two months. We are now publishing
+it as open source so the implementation, examples, and trade-offs can be
+reviewed by other teams. The current release is v0.1.3 and remains an early
+release; production identity, deployment, and database isolation still belong
+to the integrating application.
+
 Loom is an embed-first governance runtime for Go applications. It gives an
 application one controlled execution path for operations that can change data,
 move money, affect access, or trigger external side effects.
@@ -15,7 +21,7 @@ Go code or through HTTP, MCP, GraphQL, gRPC, and Weft adapters.
 Loom has been used internally for the past two months to address these
 governance and security problems in real application workflows. We are now
 open-sourcing it so the implementation can be inspected, adopted by other
-teams, and improved in the open. The v0.1.1 release is an early public release:
+teams, and improved in the open. The v0.1.3 release is an early public release:
 the core runtime is substantial, while packaging, production integrations, and
 documentation will continue to mature with community use.
 

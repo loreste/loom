@@ -27,17 +27,17 @@ func Register(reg *core.Registry) error {
 		"additionalProperties":false
 	}`)
 	if err := reg.Register(&core.Operation{
-		Name:        OpCapture,
-		Description: "Capture a payment",
-		InputSchema: captureSchema,
-		Permissions: []string{"payment.capture"},
-		Resources:   []string{"payment"},
-		Risk:        core.RiskHigh,
-		Effects:     []core.Effect{core.EffectMoney, core.EffectWrite},
-		Approval:    core.ApprovalPolicy{MinRisk: core.RiskHigh},
-		Idempotency: core.IdempotencyPolicy{Required: true, TTLSeconds: 86400},
+		Name:            OpCapture,
+		Description:     "Capture a payment",
+		InputSchema:     captureSchema,
+		Permissions:     []string{"payment.capture"},
+		Resources:       []string{"payment"},
+		Risk:            core.RiskHigh,
+		Effects:         []core.Effect{core.EffectMoney, core.EffectWrite},
+		Approval:        core.ApprovalPolicy{MinRisk: core.RiskHigh},
+		Idempotency:     core.IdempotencyPolicy{Required: true, TTLSeconds: 86400},
 		SensitiveFields: []string{"pan", "cvv", "raw_processor_payload"},
-		Limits:      map[string]int64{"amount": 10000},
+		Limits:          map[string]int64{"amount": 10000},
 	}, handleCapture); err != nil {
 		return err
 	}
@@ -54,22 +54,25 @@ func Register(reg *core.Registry) error {
 		"additionalProperties":false
 	}`)
 	return reg.Register(&core.Operation{
-		Name:        OpRefund,
-		Description: "Refund a payment",
-		InputSchema: refundSchema,
-		Permissions: []string{"payment.refund"},
-		Resources:   []string{"payment"},
-		Risk:        core.RiskCritical,
-		Effects:     []core.Effect{core.EffectMoney, core.EffectWrite},
-		Approval:    core.ApprovalPolicy{Required: true},
-		Idempotency: core.IdempotencyPolicy{Required: true, TTLSeconds: 86400},
+		Name:            OpRefund,
+		Description:     "Refund a payment",
+		InputSchema:     refundSchema,
+		Permissions:     []string{"payment.refund"},
+		Resources:       []string{"payment"},
+		Risk:            core.RiskCritical,
+		Effects:         []core.Effect{core.EffectMoney, core.EffectWrite},
+		Approval:        core.ApprovalPolicy{Required: true},
+		Idempotency:     core.IdempotencyPolicy{Required: true, TTLSeconds: 86400},
 		SensitiveFields: []string{"pan", "cvv"},
 	}, handleRefund)
 }
 
 func handleCapture(ec *core.ExecutionContext) (*core.Result, error) {
-	amount, _ := ec.Input["amount"].(float64)
 	currency, _ := ec.Input["currency"].(string)
+	amount, err := core.ParseMoney(ec.Input["amount"], currency)
+	if err != nil {
+		return nil, fmt.Errorf("amount: %w", err)
+	}
 	merchant, _ := ec.Input["merchant_id"].(string)
 	// Simulated capture — real systems call PSP behind network guardrails.
 	id := "pay_" + ec.TraceID[:8]
@@ -88,7 +91,11 @@ func handleCapture(ec *core.ExecutionContext) (*core.Result, error) {
 }
 
 func handleRefund(ec *core.ExecutionContext) (*core.Result, error) {
-	amount, _ := ec.Input["amount"].(float64)
+	currency, _ := ec.Input["currency"].(string)
+	amount, err := core.ParseMoney(ec.Input["amount"], currency)
+	if err != nil {
+		return nil, fmt.Errorf("amount: %w", err)
+	}
 	pid, _ := ec.Input["payment_id"].(string)
 	return &core.Result{
 		Output: map[string]any{

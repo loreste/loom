@@ -203,16 +203,17 @@ func (s *Server) proxyOperation(w http.ResponseWriter, r *http.Request, op strin
 		idem = r.Header.Get("Idempotency-Key")
 	}
 	req := core.Request{
-		Operation:      op,
-		Credentials:    creds,
-		Boundary:       core.BoundaryID(eb.Boundary),
-		Resource:       eb.Resource,
-		Input:          eb.Input,
-		Fields:         eb.Fields,
-		IdempotencyKey: idem,
-		ApprovalToken:  eb.ApprovalToken,
-		Metadata:       md,
-		TraceID:        r.Header.Get("X-Trace-Id"),
+		Operation:        op,
+		OperationVersion: eb.OperationVersion,
+		Credentials:      creds,
+		Boundary:         core.BoundaryID(eb.Boundary),
+		Resource:         eb.Resource,
+		Input:            eb.Input,
+		Fields:           eb.Fields,
+		IdempotencyKey:   idem,
+		ApprovalToken:    eb.ApprovalToken,
+		Metadata:         md,
+		TraceID:          r.Header.Get("X-Trace-Id"),
 	}
 	if req.Input == nil {
 		req.Input = map[string]any{}
@@ -352,14 +353,15 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 }
 
 type executeBody struct {
-	Operation      string            `json:"operation"`
-	Boundary       string            `json:"boundary"`
-	Input          map[string]any    `json:"input"`
-	Fields         []string          `json:"fields"`
-	IdempotencyKey string            `json:"idempotency_key"`
-	ApprovalToken  string            `json:"approval_token"`
-	Resource       *core.ResourceRef `json:"resource"`
-	Metadata       map[string]string `json:"metadata"`
+	Operation        string            `json:"operation"`
+	OperationVersion string            `json:"operation_version,omitempty"`
+	Boundary         string            `json:"boundary"`
+	Input            map[string]any    `json:"input"`
+	Fields           []string          `json:"fields"`
+	IdempotencyKey   string            `json:"idempotency_key"`
+	ApprovalToken    string            `json:"approval_token"`
+	Resource         *core.ResourceRef `json:"resource"`
+	Metadata         map[string]string `json:"metadata"`
 	// Delegation optional untrusted claim; runtime validates.
 	Delegation *core.DelegationChain `json:"delegation"`
 }
@@ -416,17 +418,18 @@ func (s *Server) handleExecute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	req := core.Request{
-		Operation:      eb.Operation,
-		Credentials:    creds,
-		Delegation:     eb.Delegation,
-		Boundary:       core.BoundaryID(eb.Boundary),
-		Resource:       eb.Resource,
-		Input:          eb.Input,
-		Fields:         eb.Fields,
-		IdempotencyKey: idem,
-		ApprovalToken:  approval,
-		Metadata:       md,
-		TraceID:        r.Header.Get("X-Trace-Id"),
+		Operation:        eb.Operation,
+		OperationVersion: eb.OperationVersion,
+		Credentials:      creds,
+		Delegation:       eb.Delegation,
+		Boundary:         core.BoundaryID(eb.Boundary),
+		Resource:         eb.Resource,
+		Input:            eb.Input,
+		Fields:           eb.Fields,
+		IdempotencyKey:   idem,
+		ApprovalToken:    approval,
+		Metadata:         md,
+		TraceID:          r.Header.Get("X-Trace-Id"),
 	}
 
 	resp := s.RT.Execute(r.Context(), req)
