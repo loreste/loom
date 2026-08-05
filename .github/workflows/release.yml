@@ -34,9 +34,16 @@ jobs:
 
       - name: Cross-compile
         env:
+          # Prefer tag name (v0.1.0 → 0.1.0); workflow_dispatch can override.
           VERSION: ${{ github.event.inputs.version || github.ref_name }}
         run: |
           chmod +x scripts/build-release.sh
+          # Strip leading v so artifacts match VERSION file convention.
+          export VERSION="${VERSION#v}"
+          if [[ -z "$VERSION" || "$VERSION" == "main" || "$VERSION" == "master" ]]; then
+            VERSION="$(tr -d '[:space:]' < VERSION)"
+          fi
+          export VERSION
           ./scripts/build-release.sh
 
       - name: Upload artifacts

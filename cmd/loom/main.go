@@ -11,11 +11,13 @@ import (
 	"github.com/loreste/loom/config"
 )
 
-// Filled at link time by scripts/build-release.sh:
+// Filled at link time by scripts/build-release.sh / make build:
 //
 //	-ldflags "-X main.version=… -X main.commit=… -X main.date=…"
+//
+// Default matches VERSION file when not injected (dev builds).
 var (
-	version = "dev"
+	version = "0.1.0"
 	commit  = "unknown"
 	date    = "unknown"
 )

@@ -5,7 +5,8 @@
 #   make test
 #   make clean
 
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+# Product version: VERSION file is canonical (e.g. 0.1.0). Override with VERSION=…
+VERSION ?= $(shell tr -d '[:space:]' < VERSION 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 DATE    ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS  = -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)

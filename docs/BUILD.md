@@ -17,7 +17,8 @@ All builds use **`CGO_ENABLED=0`** (pure Go: modernc sqlite, pgx, gRPC).
 make build                 # → bin/loom
 
 # All OS/arch
-VERSION=0.3.0 make release # → dist/ + SHA256SUMS
+# VERSION defaults to contents of ./VERSION (currently 0.1.0)
+make release                 # → dist/ + SHA256SUMS
 
 # Install local dist binary (macOS/Linux)
 ./scripts/install.sh --from-dist --prefix "$HOME/.local"
@@ -25,24 +26,29 @@ VERSION=0.3.0 make release # → dist/ + SHA256SUMS
 
 Windows: copy `dist/loom-*-windows-amd64.exe` to a directory on `PATH` as `loom.exe`.
 
+Version source of truth: root **`VERSION`** file (semver, no `v` prefix).  
+Git tags use a leading `v` (e.g. `v0.1.0`). See `CHANGELOG.md`.
+
 ## Docker (Linux)
 
 ```bash
+VERSION=$(tr -d '[:space:]' < VERSION)
 docker build \
-  --build-arg VERSION=0.3.0 \
+  --build-arg VERSION=$VERSION \
   --build-arg COMMIT=$(git rev-parse --short HEAD) \
-  -t loom:0.3.0 .
+  -t loom:$VERSION .
 
 docker run --rm -p 8080:8080 \
   -e LOOM_ENV=development \
-  loom:0.3.0 serve --addr=:8080
+  loom:$VERSION serve --addr=:8080
 ```
 
 Multi-arch (requires buildx):
 
 ```bash
+VERSION=$(tr -d '[:space:]' < VERSION)
 docker buildx build --platform linux/amd64,linux/arm64 \
-  -t your-registry/loom:0.3.0 --push .
+  -t your-registry/loom:$VERSION --push .
 ```
 
 Production containers **must** set:
@@ -57,12 +63,13 @@ LOOM_DATABASE_URL=…
 
 ## GitHub Releases
 
-1. Tag: `git tag v0.3.0 && git push origin v0.3.0`
-2. Workflow `.github/workflows/release.yml` runs tests, cross-compiles, uploads assets + `SHA256SUMS`.
+1. Bump `VERSION` and `CHANGELOG.md`
+2. Commit, then tag: `git tag v$(tr -d '[:space:]' < VERSION) && git push origin v0.1.0`
+3. Workflow `.github/workflows/release.yml` runs tests, cross-compiles, uploads assets + `SHA256SUMS`.
 
 ## Verify a download
 
 ```bash
 shasum -a 256 -c SHA256SUMS
-./loom-0.3.0-darwin-arm64 version
+./loom-0.1.0-darwin-arm64 version
 ```

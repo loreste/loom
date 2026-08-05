@@ -6,11 +6,12 @@
 #
 # From a local dist/ after make release:
 #   ./scripts/install.sh --from-dist
-#   VERSION=0.3.0 ./scripts/install.sh --from-dist --prefix=$HOME/.local
+#   VERSION=0.1.0 ./scripts/install.sh --from-dist --prefix=$HOME/.local
 #
 # Windows: download loom-*-windows-amd64.exe from the release assets and rename to loom.exe.
 set -euo pipefail
 
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PREFIX="${PREFIX:-/usr/local}"
 VERSION="${VERSION:-}"
 FROM_DIST=0
@@ -21,7 +22,7 @@ usage() {
 Usage: install.sh [options]
   --from-dist     Install from ./dist (after make release)
   --prefix DIR    Install prefix (default /usr/local → $PREFIX/bin/loom)
-  --version VER   Version string matching dist artifact (e.g. 0.3.0 or v0.3.0)
+  --version VER   Version string matching dist artifact (e.g. 0.1.0 or v0.1.0)
   -h, --help      Show help
 EOF
 }
@@ -53,12 +54,12 @@ case "$OS" in
 esac
 
 if [[ -z "$VERSION" ]]; then
-  if [[ -n "${GITHUB_REF_NAME:-}" ]]; then
+  if [[ -f "$ROOT/VERSION" ]]; then
+    VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")"
+  elif [[ -n "${GITHUB_REF_NAME:-}" ]]; then
     VERSION="${GITHUB_REF_NAME#v}"
-  elif command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    VERSION="$(git describe --tags --always 2>/dev/null | sed 's/^v//')"
   else
-    VERSION="0.3.0"
+    VERSION="0.1.0"
   fi
 fi
 VERSION="${VERSION#v}"
@@ -70,7 +71,6 @@ DEST="${DEST_DIR}/loom"
 mkdir -p "$DEST_DIR"
 
 if [[ "$FROM_DIST" -eq 1 ]]; then
-  ROOT="$(cd "$(dirname "$0")/.." && pwd)"
   SRC="${ROOT}/dist/${NAME}"
   if [[ ! -f "$SRC" ]]; then
     echo "missing $SRC — run: VERSION=${VERSION} make release" >&2

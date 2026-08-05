@@ -47,7 +47,9 @@ jobs:
       - name: Cross-compile
         run: |
           chmod +x scripts/build-release.sh
-          VERSION="${GITHUB_SHA::7}" ./scripts/build-release.sh
+          # Use VERSION file (semver); append short sha for uniqueness on main builds.
+          BASE="$(tr -d '[:space:]' < VERSION)"
+          VERSION="${BASE}+${GITHUB_SHA::7}" ./scripts/build-release.sh
       - name: Upload binaries
         uses: actions/upload-artifact@v4
         with:

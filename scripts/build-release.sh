@@ -3,7 +3,7 @@
 #
 # Usage:
 #   ./scripts/build-release.sh              # → dist/
-#   VERSION=v0.3.0 ./scripts/build-release.sh
+#   VERSION=0.1.0 ./scripts/build-release.sh
 #   OUT=./artifacts ./scripts/build-release.sh
 #
 # Pure Go (CGO_ENABLED=0): modernc sqlite, pgx, grpc — no C toolchain required.
@@ -13,14 +13,17 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 OUT="${OUT:-$ROOT/dist}"
-VERSION="${VERSION:-}"
-if [[ -z "$VERSION" ]]; then
-  if git describe --tags --always --dirty 2>/dev/null | grep -q .; then
-    VERSION="$(git describe --tags --always --dirty 2>/dev/null)"
+# Prefer explicit VERSION, then VERSION file, then git tag, then dev.
+if [[ -z "${VERSION:-}" ]]; then
+  if [[ -f "$ROOT/VERSION" ]]; then
+    VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")"
+  elif git describe --tags --exact-match 2>/dev/null | grep -q .; then
+    VERSION="$(git describe --tags --exact-match 2>/dev/null | sed 's/^v//')"
   else
     VERSION="dev"
   fi
 fi
+VERSION="${VERSION#v}"
 COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
