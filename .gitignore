@@ -1,5 +1,7 @@
-# Binaries
+# Binaries / release artifacts
 /loom
+/bin/
+/dist/
 *.exe
 *.test
 *.out

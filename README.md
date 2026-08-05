@@ -31,6 +31,28 @@ go run ./examples/worker/        # job queue → Loom (no HTTP)
 go run ./examples/agent-client/  # manifest → openapi → MCP → execute
 ```
 
+### Install / cross-compile (Windows · macOS · Linux)
+
+```bash
+# Native binary
+make build          # → bin/loom
+
+# All platforms (CGO-free)
+make release        # → dist/loom-<ver>-{linux,darwin,windows}-{amd64,arm64}[ .exe]
+# or: ./scripts/build-release.sh
+
+./dist/loom-*-$(go env GOOS)-$(go env GOARCH) version
+```
+
+| Platform | Arch |
+|----------|------|
+| Linux | amd64, arm64 |
+| macOS | amd64, arm64 |
+| Windows | amd64, arm64 |
+
+Binaries are pure Go (`CGO_ENABLED=0`). Checksums land in `dist/SHA256SUMS`.  
+Tag `v*` triggers the GitHub Release workflow (`.github/workflows/release.yml`).
+
 Deep dive: [`docs/EMBED.md`](docs/EMBED.md)
 
 ### App DB + jobs

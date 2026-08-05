@@ -11,6 +11,15 @@ import (
 	"github.com/loreste/loom/config"
 )
 
+// Filled at link time by scripts/build-release.sh:
+//
+//	-ldflags "-X main.version=… -X main.commit=… -X main.date=…"
+var (
+	version = "dev"
+	commit  = "unknown"
+	date    = "unknown"
+)
+
 func main() {
 	env := config.Load()
 	if err := env.Validate(); err != nil {
@@ -43,5 +52,6 @@ func main() {
 	}
 	defer func() { _ = p.Close() }()
 	ad := cli.NewWithPlatform(p)
+	ad.Version = fmt.Sprintf("%s (%s %s)", version, commit, date)
 	os.Exit(ad.Run(context.Background(), os.Args[1:]))
 }

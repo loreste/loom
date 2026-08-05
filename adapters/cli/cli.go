@@ -38,6 +38,8 @@ type Adapter struct {
 	TokenEnv        string
 	Out             io.Writer
 	Err             io.Writer
+	// Version string shown by `loom version` (set by cmd/loom via ldflags).
+	Version string
 }
 
 // New creates a CLI adapter.
@@ -87,7 +89,11 @@ func (a *Adapter) Run(ctx context.Context, args []string) int {
 		}
 		return a.runApprove(args[1:])
 	case "version":
-		fmt.Fprintln(a.outW(), "loom 0.3.0")
+		v := a.Version
+		if v == "" {
+			v = "dev"
+		}
+		fmt.Fprintln(a.outW(), "loom", v)
 		return 0
 	case "help", "-h", "--help":
 		return a.Run(ctx, nil)
