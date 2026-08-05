@@ -11,10 +11,11 @@ import (
 
 	loomgql "github.com/loreste/loom/adapters/graphql"
 	"github.com/loreste/loom/bootstrap"
+	"github.com/loreste/loom/internal/testtokens"
 )
 
 func TestGraphQLHealth(t *testing.T) {
-	p, err := bootstrap.NewPlatform(bootstrap.Config{PolicySyncInterval: -1})
+	p, err := bootstrap.NewPlatform(bootstrap.Config{PolicySyncInterval: -1, DemoTokens: testtokens.Demo()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +35,7 @@ func TestGraphQLHealth(t *testing.T) {
 }
 
 func TestGraphQLExecuteAllow(t *testing.T) {
-	p, err := bootstrap.NewPlatform(bootstrap.Config{PolicySyncInterval: -1})
+	p, err := bootstrap.NewPlatform(bootstrap.Config{PolicySyncInterval: -1, DemoTokens: testtokens.Demo()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +73,7 @@ func TestGraphQLExecuteAllow(t *testing.T) {
 }
 
 func TestGraphQLExecuteDenyNoAuth(t *testing.T) {
-	p, _ := bootstrap.NewPlatform(bootstrap.Config{PolicySyncInterval: -1})
+	p, _ := bootstrap.NewPlatform(bootstrap.Config{PolicySyncInterval: -1, DemoTokens: testtokens.Demo()})
 	t.Cleanup(func() { _ = p.Close() })
 
 	q := `mutation {
@@ -94,7 +95,7 @@ func TestGraphQLExecuteDenyNoAuth(t *testing.T) {
 }
 
 func TestGraphQLBypassHeaderDenied(t *testing.T) {
-	p, _ := bootstrap.NewPlatform(bootstrap.Config{PolicySyncInterval: -1})
+	p, _ := bootstrap.NewPlatform(bootstrap.Config{PolicySyncInterval: -1, DemoTokens: testtokens.Demo()})
 	t.Cleanup(func() { _ = p.Close() })
 	h, err := loomgql.Handler(p.Runtime)
 	if err != nil {
@@ -129,7 +130,7 @@ func TestGraphQLBypassHeaderDenied(t *testing.T) {
 }
 
 func TestGraphQLHTTPHandlerAllow(t *testing.T) {
-	p, _ := bootstrap.NewPlatform(bootstrap.Config{PolicySyncInterval: -1})
+	p, _ := bootstrap.NewPlatform(bootstrap.Config{PolicySyncInterval: -1, DemoTokens: testtokens.Demo()})
 	t.Cleanup(func() { _ = p.Close() })
 	h, err := loomgql.Handler(p.Runtime)
 	if err != nil {

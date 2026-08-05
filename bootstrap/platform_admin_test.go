@@ -8,10 +8,11 @@ import (
 
 	"github.com/loreste/loom/bootstrap"
 	"github.com/loreste/loom/core"
+	"github.com/loreste/loom/internal/testtokens"
 )
 
 func TestGovernedApprovalIssue(t *testing.T) {
-	p, err := bootstrap.NewPlatform(bootstrap.Config{})
+	p, err := bootstrap.NewPlatform(bootstrap.Config{DemoTokens: testtokens.Demo()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +74,7 @@ func TestGovernedApprovalIssue(t *testing.T) {
 }
 
 func TestCannotIssueApprovalForApprovalIssue(t *testing.T) {
-	p, _ := bootstrap.NewPlatform(bootstrap.Config{})
+	p, _ := bootstrap.NewPlatform(bootstrap.Config{DemoTokens: testtokens.Demo()})
 	resp := p.Runtime.Execute(context.Background(), core.Request{
 		Operation:   "approval.issue",
 		Credentials: core.Credentials{Token: "approver-admin-token"},
@@ -92,7 +93,7 @@ func TestCannotIssueApprovalForApprovalIssue(t *testing.T) {
 }
 
 func TestCatalogListGoverned(t *testing.T) {
-	p, _ := bootstrap.NewPlatform(bootstrap.Config{})
+	p, _ := bootstrap.NewPlatform(bootstrap.Config{DemoTokens: testtokens.Demo()})
 	// alice cannot list
 	resp := p.Runtime.Execute(context.Background(), core.Request{
 		Operation:   "catalog.list",
@@ -119,7 +120,7 @@ func TestCatalogListGoverned(t *testing.T) {
 
 func TestDataDirStickyApprovals(t *testing.T) {
 	dir := t.TempDir()
-	p1, err := bootstrap.NewPlatform(bootstrap.Config{DataDir: dir})
+	p1, err := bootstrap.NewPlatform(bootstrap.Config{DataDir: dir, DemoTokens: testtokens.Demo()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +129,7 @@ func TestDataDirStickyApprovals(t *testing.T) {
 	}
 
 	// New process simulation
-	p2, err := bootstrap.NewPlatform(bootstrap.Config{DataDir: dir})
+	p2, err := bootstrap.NewPlatform(bootstrap.Config{DataDir: dir, DemoTokens: testtokens.Demo()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +162,7 @@ func TestDataDirStickyApprovals(t *testing.T) {
 	})
 	if !resp2.Allowed || !resp2.IdempotentReplay {
 		// reload p3 for true disk idempotency
-		p3, _ := bootstrap.NewPlatform(bootstrap.Config{DataDir: dir})
+		p3, _ := bootstrap.NewPlatform(bootstrap.Config{DataDir: dir, DemoTokens: testtokens.Demo()})
 		resp3 := p3.Runtime.Execute(context.Background(), core.Request{
 			Operation:   "payment.capture",
 			Credentials: core.Credentials{Token: "bob-finance-token"},

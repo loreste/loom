@@ -24,8 +24,10 @@ make build
 Run a local example before exposing a network adapter:
 
 ```bash
+LOOM_EXAMPLE_TOKEN="$(openssl rand -hex 24)" \\
+LOOM_EXAMPLE_APPROVAL_TOKEN="$(openssl rand -hex 24)" \\
 go run ./examples/embed/
-go run ./examples/orders-app/
+LOOM_EXAMPLE_TOKEN="$(openssl rand -hex 24)" go run ./examples/orders-app/
 ```
 
 ## Install a release binary
@@ -107,11 +109,16 @@ export LOOM_DISABLE_DEMO_PRINCIPALS=true
 export LOOM_REQUIRE_DURABLE=true
 export LOOM_DATABASE_URL='postgres://...'
 export LOOM_REDIS_URL='redis://...'
-export LOOM_JWT_SECRET='managed-secret-at-least-16-bytes'
+export LOOM_JWT_SECRET="$(openssl rand -hex 32)" # use your secret manager in production
 export LOOM_JWT_KEY_ID='active-key'
 export LOOM_JWT_ISSUER='https://issuer.example'
 export LOOM_JWT_AUDIENCE='loom-api'
 ```
+
+For tenant-aware JWTs, also set `LOOM_TENANT_CLAIM` to the verified claim that
+carries the tenant identifier. Loom maps it to the request boundary before
+authorization; configure the application database with the tenant-bound
+options described in [TENANCY.md](TENANCY.md).
 
 See [IDENTITY.md](IDENTITY.md) for OIDC/JWKS and mTLS integration, and
 [TENANCY.md](TENANCY.md) plus the [tenant reference](../examples/tenancy/README.md)

@@ -24,18 +24,18 @@ var (
 	reCommentBlock = regexp.MustCompile(`/\*|\*/`)
 	// crude table extractors — identifiers may be "double"/'single'/`backtick`
 	// quoted and optionally schema-qualified: users, public.users, public."users"
-	qi      = `(?:"[^"]*"|'[^']*'|` + "`[^`]*`" + `|[a-zA-Z_][\w]*)`
-	qident  = qi + `(?:\.` + qi + `)?`
-	reFrom  = regexp.MustCompile(`(?i)\bFROM\s+(` + qident + `)`)
-	reJoin  = regexp.MustCompile(`(?i)\bJOIN\s+(` + qident + `)`)
-	reInto  = regexp.MustCompile(`(?i)\bINTO\s+(` + qident + `)`)
+	qi       = `(?:"[^"]*"|'[^']*'|` + "`[^`]*`" + `|[a-zA-Z_][\w]*)`
+	qident   = qi + `(?:\.` + qi + `)?`
+	reFrom   = regexp.MustCompile(`(?i)\bFROM\s+(` + qident + `)`)
+	reJoin   = regexp.MustCompile(`(?i)\bJOIN\s+(` + qident + `)`)
+	reInto   = regexp.MustCompile(`(?i)\bINTO\s+(` + qident + `)`)
 	reUpdate = regexp.MustCompile(`(?i)\bUPDATE\s+(` + qident + `)`)
 	reTable  = regexp.MustCompile(`(?i)\bTABLE\s+(` + qident + `)`)
 	// reUnparsedSource fires when FROM/JOIN is not followed by an identifier or a
 	// parenthesized subquery — such a source extracts zero tables and would
 	// silently pass an allowlist, so fail closed.
 	reUnparsedSource = regexp.MustCompile(`(?i)\b(?:FROM|JOIN)\s*[^\s(a-zA-Z_"'` + "\x60" + `]`)
-	reDanger  = regexp.MustCompile(`(?i)\b(sleep|benchmark|load_file)\s*\(|\b(pg_sleep|into\s+(out|dump)file|copy\s+|\\\\|xp_cmdshell|pg_read_file|lo_import)\b`)
+	reDanger         = regexp.MustCompile(`(?i)\b(sleep|benchmark|load_file)\s*\(|\b(pg_sleep|into\s+(out|dump)file|copy\s+|\\\\|xp_cmdshell|pg_read_file|lo_import)\b`)
 )
 
 // Classify validates and classifies SQL. Fail-closed on anything suspicious.
@@ -225,4 +225,60 @@ func scanKeywords(s string) map[string]bool {
 		}
 	}
 	return out
+}
+
+var sqlFunctionCallPattern = regexp.MustCompile(`(?i)(?:\b[a-zA-Z_]\w*\s*\.\s*)?\b([a-zA-Z_]\w*)\s*\(`)
+
+var defaultAllowedSQLFunctions = map[string]struct{}{
+	"abs": {}, "avg": {}, "ceil": {}, "coalesce": {}, "concat": {},
+	"count": {}, "date": {}, "date_trunc": {}, "floor": {}, "greatest": {},
+	"least": {}, "length": {}, "lower": {}, "ltrim": {}, "max": {},
+	"min": {}, "nullif": {}, "round": {}, "rtrim": {}, "substr": {},
+	"substring": {}, "sum": {}, "trim": {}, "upper": {}, "current_date": {},
+	"current_time": {}, "current_timestamp": {}, "now": {}, "currval": {},
+	"last_insert_rowid": {},
+}
+
+// checkFunctions rejects extension and user-defined SQL functions unless the
+// pool explicitly allowlists them. This is deliberately conservative: SQL
+// classification is not a PostgreSQL parser or a database sandbox.
+func checkFunctions(sqlText string, allowed []string) error {
+	if strings.TrimSpace(sqlText) == "" {
+		return fmt.Errorf("db: empty sql")
+	}
+	allow := defaultAllowedSQLFunctions
+	if len(allowed) > 0 {
+		allow = make(map[string]struct{}, len(allowed))
+		for _, name := range allowed {
+			name = strings.ToLower(strings.TrimSpace(name))
+			if name != "" {
+				allow[name] = struct{}{}
+			}
+		}
+	}
+	for _, match := range sqlFunctionCallPattern.FindAllStringSubmatchIndex(sqlText, -1) {
+		name := strings.ToLower(sqlText[match[2]:match[3]])
+		prefix := strings.TrimSpace(sqlText[:match[0]])
+		previous := ""
+		if fields := strings.Fields(prefix); len(fields) > 0 {
+			previous = strings.ToLower(strings.Trim(fields[len(fields)-1], "(),"))
+		}
+		// These words introduce table, value, or predicate syntax rather than
+		// a function invocation.
+		switch previous {
+		case "from", "join", "into", "update", "table", "values", "in", "exists":
+			continue
+		}
+		if name == "set_config" {
+			return fmt.Errorf("db: set_config is not allowed through governed SQL")
+		}
+		switch name {
+		case "values", "in", "exists":
+			continue
+		}
+		if _, ok := allow[name]; !ok {
+			return fmt.Errorf("db: SQL function %q is not allowlisted", name)
+		}
+	}
+	return nil
 }

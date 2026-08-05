@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS loom_audit (
     principal   TEXT NOT NULL DEFAULT '',
     delegator   TEXT NOT NULL DEFAULT '',
     boundary    TEXT NOT NULL DEFAULT '',
+    tenant_id   TEXT NOT NULL DEFAULT '',
     operation   TEXT NOT NULL DEFAULT '',
     resource    TEXT NOT NULL DEFAULT '',
     risk        TEXT NOT NULL DEFAULT '',
@@ -52,9 +53,12 @@ CREATE TABLE IF NOT EXISTS loom_audit (
     auth_method TEXT NOT NULL DEFAULT ''
 );
 
+ALTER TABLE loom_audit ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT '';
+
 CREATE INDEX IF NOT EXISTS idx_loom_audit_ts ON loom_audit (ts DESC);
 CREATE INDEX IF NOT EXISTS idx_loom_audit_trace ON loom_audit (trace_id);
 CREATE INDEX IF NOT EXISTS idx_loom_audit_principal ON loom_audit (principal);
+CREATE INDEX IF NOT EXISTS idx_loom_audit_tenant ON loom_audit (tenant_id);
 
 -- Distributed policy documents (replace semantics by version).
 CREATE TABLE IF NOT EXISTS loom_policy (

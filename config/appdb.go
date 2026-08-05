@@ -30,6 +30,11 @@ type AppDB struct {
 	MaxRows int
 	// StatementTimeout.
 	StatementTimeout time.Duration
+	// RequireTenantRLS forces handlers to use db.Executor.BeginTenant for
+	// PostgreSQL pools protected by row-level security.
+	RequireTenantRLS bool
+	// TenantSetting is the PostgreSQL custom setting used by RLS policies.
+	TenantSetting string
 }
 
 // LoadAppDB reads LOOM_APP_DB_* variables. Empty URL means not configured.
@@ -67,6 +72,8 @@ func LoadAppDB() AppDB {
 		ReadOnly:         envBool("LOOM_APP_DB_READONLY", false),
 		MaxRows:          envInt("LOOM_APP_DB_MAX_ROWS", 1000),
 		StatementTimeout: ParseDurationEnv("LOOM_APP_DB_TIMEOUT", 5*time.Second),
+		RequireTenantRLS: envBool("LOOM_APP_DB_REQUIRE_TENANT_RLS", false),
+		TenantSetting:    os.Getenv("LOOM_APP_DB_TENANT_SETTING"),
 	}
 }
 
@@ -88,13 +95,15 @@ func guessDriver(url string) string {
 func (a AppDB) Options() db.Options {
 	d := db.DetectDialect(a.Driver)
 	return db.Options{
-		DriverName:        a.Driver,
-		Dialect:           d,
-		AllowedTables:     append([]string(nil), a.Tables...),
-		AllowedBoundaries: append([]core.BoundaryID(nil), a.Boundaries...),
-		ReadOnly:          a.ReadOnly,
-		MaxRows:           a.MaxRows,
-		StatementTimeout:  a.StatementTimeout,
+		RequireTenantContext: a.RequireTenantRLS,
+		TenantSetting:        a.TenantSetting,
+		DriverName:           a.Driver,
+		Dialect:              d,
+		AllowedTables:        append([]string(nil), a.Tables...),
+		AllowedBoundaries:    append([]core.BoundaryID(nil), a.Boundaries...),
+		ReadOnly:             a.ReadOnly,
+		MaxRows:              a.MaxRows,
+		StatementTimeout:     a.StatementTimeout,
 	}
 }
 
@@ -108,6 +117,9 @@ func (a AppDB) Validate() error {
 	}
 	if a.Pool == "" {
 		return fmt.Errorf("LOOM_APP_DB_POOL empty")
+	}
+	if a.RequireTenantRLS && db.DetectDialect(a.Driver) != db.DialectPostgres {
+		return fmt.Errorf("tenant RLS requires a PostgreSQL application database")
 	}
 	return nil
 }

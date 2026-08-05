@@ -14,7 +14,9 @@ server-side. See [`../../docs/INSTALL.md`](../../docs/INSTALL.md).
 ```ts
 import { Client } from "@loreste/loom-sdk";
 
-const c = new Client("http://127.0.0.1:8080", "alice-secret-token");
+const token = process.env.LOOM_TOKEN;
+if (!token) throw new Error("LOOM_TOKEN is required");
+const c = new Client("http://127.0.0.1:8080", token);
 const resp = await c.call({
   operation: "document.read",
   boundary: "dev",

@@ -3,6 +3,7 @@
 package admin
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -24,6 +25,10 @@ const (
 type Deps struct {
 	Approvals approval.Issuer
 	Registry  *core.Registry
+	// ApprovalScope optionally authorizes an issuer to approve a target
+	// principal/operation/boundary. The default scope is same-boundary and
+	// still requires a registered operation that actually needs approval.
+	ApprovalScope func(context.Context, core.Identity, *core.Operation, core.PrincipalID, core.BoundaryID) error
 }
 
 // Register wires admin operations.
@@ -56,11 +61,11 @@ func Register(reg *core.Registry, deps Deps) error {
 		// but MinRisk high means issuers need prior approval when risk elevates.
 		// Static Required=false so bootstrap admin can issue with capability+policy only
 		// unless risk engine raises to critical.
-		Approval: core.ApprovalPolicy{MinRisk: core.RiskCritical},
-		Idempotency: core.IdempotencyPolicy{Required: true, TTLSeconds: 3600},
+		Approval:        core.ApprovalPolicy{MinRisk: core.RiskCritical},
+		Idempotency:     core.IdempotencyPolicy{Required: true, TTLSeconds: 3600},
 		SensitiveFields: []string{"token"},
 	}, func(ec *core.ExecutionContext) (*core.Result, error) {
-		return handleIssue(ec, deps.Approvals)
+		return handleIssue(ec, deps)
 	}); err != nil {
 		return err
 	}
@@ -127,15 +132,36 @@ func Register(reg *core.Registry, deps Deps) error {
 	})
 }
 
-func handleIssue(ec *core.ExecutionContext, iss approval.Issuer) (*core.Result, error) {
+func handleIssue(ec *core.ExecutionContext, deps Deps) (*core.Result, error) {
 	principal, _ := ec.Input["principal"].(string)
 	operation, _ := ec.Input["operation"].(string)
 	boundary, _ := ec.Input["boundary"].(string)
+	if principal == "" || operation == "" || boundary == "" {
+		return nil, fmt.Errorf("approval target principal, operation, and boundary are required")
+	}
+	if deps.Registry == nil {
+		return nil, fmt.Errorf("approval registry not configured")
+	}
+	targetOp, err := deps.Registry.Get(operation)
+	if err != nil {
+		return nil, fmt.Errorf("approval target operation: %w", err)
+	}
+	if !targetOp.Approval.Required && targetOp.Approval.MinRisk <= core.RiskLow && len(targetOp.Approval.Effects) == 0 {
+		return nil, fmt.Errorf("operation %q does not require approval", operation)
+	}
 	// Adversarial: issuer cannot mint approvals for ops they could not themselves
 	// be granted — still enforced by policy who may call approval.issue.
 	// Cannot issue for approval.issue recursively to amplify (optional hard block).
 	if operation == OpApprovalIssue {
 		return nil, fmt.Errorf("cannot issue approval for approval.issue")
+	}
+	targetBoundary := core.BoundaryID(boundary)
+	if deps.ApprovalScope != nil {
+		if err := deps.ApprovalScope(ec.Ctx, ec.Identity, targetOp, core.PrincipalID(principal), targetBoundary); err != nil {
+			return nil, fmt.Errorf("approval scope denied: %w", err)
+		}
+	} else if targetBoundary != ec.Boundary {
+		return nil, fmt.Errorf("approval target boundary must match issuer boundary")
 	}
 
 	token, _ := ec.Input["token"].(string)
@@ -160,7 +186,7 @@ func handleIssue(ec *core.ExecutionContext, iss approval.Issuer) (*core.Result, 
 		maxRisk = core.ParseRiskLevel(s)
 	}
 
-	if err := iss.Issue(token, core.PrincipalID(principal), operation, core.BoundaryID(boundary), maxRisk, time.Duration(ttlSec)*time.Second); err != nil {
+	if err := deps.Approvals.Issue(token, core.PrincipalID(principal), operation, targetBoundary, maxRisk, time.Duration(ttlSec)*time.Second); err != nil {
 		return nil, err
 	}
 
@@ -168,14 +194,14 @@ func handleIssue(ec *core.ExecutionContext, iss approval.Issuer) (*core.Result, 
 	// Admins must have field grant for token to receive it.
 	return &core.Result{
 		Output: map[string]any{
-			"status":    "issued",
-			"token":     token,
-			"principal": principal,
-			"operation": operation,
-			"boundary":  boundary,
+			"status":      "issued",
+			"token":       token,
+			"principal":   principal,
+			"operation":   operation,
+			"boundary":    boundary,
 			"ttl_seconds": int64(ttlSec),
-			"max_risk":  maxRisk.String(),
-			"issued_by": string(ec.Identity.ID),
+			"max_risk":    maxRisk.String(),
+			"issued_by":   string(ec.Identity.ID),
 		},
 	}, nil
 }

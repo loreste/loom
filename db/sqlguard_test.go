@@ -146,6 +146,34 @@ func TestClassifyRejectsDangerConstructs(t *testing.T) {
 	}
 }
 
+func TestExecutorRejectsUnallowlistedFunctions(t *testing.T) {
+	sqldb, err := sql.Open("sqlite", "file:function-guard?mode=memory&cache=shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sqldb.Close() })
+	if _, err := sqldb.Exec(`CREATE TABLE users (id INTEGER PRIMARY KEY)`); err != nil {
+		t.Fatal(err)
+	}
+	reg := db.NewRegistry()
+	if err := reg.RegisterDB("main", sqldb, db.Options{AllowedTables: []string{"users"}}); err != nil {
+		t.Fatal(err)
+	}
+	ex, err := reg.ExecutorFor("main", core.Identity{ID: "u"}, "tenant-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, query := range []string{
+		`SELECT dblink_connect('evil')`,
+		`SELECT pg_ls_dir('/tmp')`,
+		`SELECT set_config('app.tenant_id', 'tenant-b', true)`,
+	} {
+		if _, err := ex.Query(context.Background(), query); err == nil {
+			t.Fatalf("dangerous function was allowed: %s", query)
+		}
+	}
+}
+
 func TestClassifyQuotedIdentifiers(t *testing.T) {
 	_, tables, err := db.Classify(`SELECT * FROM "users"`)
 	if err != nil || len(tables) != 1 || tables[0] != "users" {

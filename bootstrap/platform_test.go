@@ -7,10 +7,11 @@ import (
 
 	"github.com/loreste/loom/bootstrap"
 	"github.com/loreste/loom/core"
+	"github.com/loreste/loom/internal/testtokens"
 )
 
 func TestPlatformDenyByDefaultUnknownUser(t *testing.T) {
-	p, err := bootstrap.NewPlatform(bootstrap.Config{})
+	p, err := bootstrap.NewPlatform(bootstrap.Config{DemoTokens: testtokens.Demo()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +28,7 @@ func TestPlatformDenyByDefaultUnknownUser(t *testing.T) {
 }
 
 func TestAliceCannotCapturePayment(t *testing.T) {
-	p, _ := bootstrap.NewPlatform(bootstrap.Config{})
+	p, _ := bootstrap.NewPlatform(bootstrap.Config{DemoTokens: testtokens.Demo()})
 	// alice can discover her tools via catalog.spec
 	spec := p.Runtime.Execute(context.Background(), core.Request{
 		Operation:   "catalog.spec",
@@ -57,7 +58,7 @@ func TestAliceCannotCapturePayment(t *testing.T) {
 }
 
 func TestOpsCannotDestroy(t *testing.T) {
-	p, _ := bootstrap.NewPlatform(bootstrap.Config{})
+	p, _ := bootstrap.NewPlatform(bootstrap.Config{DemoTokens: testtokens.Demo()})
 	_ = p.IssueApproval("d", "user:ops", "server.destroy", "staging", core.RiskCritical, time.Hour)
 	// even with approval token, no capability + deny rule + not registered for ops membership on destroy
 	resp := p.Runtime.Execute(context.Background(), core.Request{
@@ -75,7 +76,7 @@ func TestOpsCannotDestroy(t *testing.T) {
 }
 
 func TestAgentPromptInjectionDenied(t *testing.T) {
-	p, _ := bootstrap.NewPlatform(bootstrap.Config{})
+	p, _ := bootstrap.NewPlatform(bootstrap.Config{DemoTokens: testtokens.Demo()})
 	resp := p.Runtime.Execute(context.Background(), core.Request{
 		Operation:   "ai.complete",
 		Credentials: core.Credentials{Token: "agent-token-dev"},
@@ -91,7 +92,7 @@ func TestAgentPromptInjectionDenied(t *testing.T) {
 }
 
 func TestAgentCompleteAllowed(t *testing.T) {
-	p, _ := bootstrap.NewPlatform(bootstrap.Config{})
+	p, _ := bootstrap.NewPlatform(bootstrap.Config{DemoTokens: testtokens.Demo()})
 	// Agents elevate risk → approval required (adversarial default).
 	_ = p.IssueApproval("appr-ai", "agent:assistant", "ai.complete", "dev", core.RiskCritical, time.Hour)
 	resp := p.Runtime.Execute(context.Background(), core.Request{
@@ -113,7 +114,7 @@ func TestAgentCompleteAllowed(t *testing.T) {
 }
 
 func TestUserAICompleteNoApproval(t *testing.T) {
-	p, _ := bootstrap.NewPlatform(bootstrap.Config{})
+	p, _ := bootstrap.NewPlatform(bootstrap.Config{DemoTokens: testtokens.Demo()})
 	// Human user stays medium risk for ai.complete — no approval.
 	resp := p.Runtime.Execute(context.Background(), core.Request{
 		Operation:   "ai.complete",
@@ -130,7 +131,7 @@ func TestUserAICompleteNoApproval(t *testing.T) {
 }
 
 func TestDeploymentReleaseNeedsApproval(t *testing.T) {
-	p, _ := bootstrap.NewPlatform(bootstrap.Config{})
+	p, _ := bootstrap.NewPlatform(bootstrap.Config{DemoTokens: testtokens.Demo()})
 	req := core.Request{
 		Operation:   "deployment.release",
 		Credentials: core.Credentials{Token: "ops-deploy-token"},
@@ -155,7 +156,7 @@ func TestDeploymentReleaseNeedsApproval(t *testing.T) {
 }
 
 func TestJWTCapsInsufficientWithoutPolicy(t *testing.T) {
-	p, _ := bootstrap.NewPlatform(bootstrap.Config{})
+	p, _ := bootstrap.NewPlatform(bootstrap.Config{DemoTokens: testtokens.Demo()})
 	// JWT claims huge caps but principal has no policy rule for payment
 	tok, err := p.MintDemoJWT("user:attacker", "dev", []string{"payment.capture", "server.destroy", "*"}, "user", time.Hour)
 	if err != nil {

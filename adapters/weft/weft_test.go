@@ -7,10 +7,11 @@ import (
 	"github.com/loreste/loom/adapters/weft"
 	"github.com/loreste/loom/bootstrap"
 	"github.com/loreste/loom/core"
+	"github.com/loreste/loom/internal/testtokens"
 )
 
 func TestWeftInvokeDocumentRead(t *testing.T) {
-	p, err := bootstrap.NewPlatform(bootstrap.Config{PolicySyncInterval: -1, DisableSeedPolicyPublish: true})
+	p, err := bootstrap.NewPlatform(bootstrap.Config{PolicySyncInterval: -1, DisableSeedPolicyPublish: true, DemoTokens: testtokens.Demo()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +36,7 @@ func TestWeftInvokeDocumentRead(t *testing.T) {
 }
 
 func TestWeftAllowlistBlocks(t *testing.T) {
-	p, _ := bootstrap.NewPlatform(bootstrap.Config{PolicySyncInterval: -1, DisableSeedPolicyPublish: true})
+	p, _ := bootstrap.NewPlatform(bootstrap.Config{PolicySyncInterval: -1, DisableSeedPolicyPublish: true, DemoTokens: testtokens.Demo()})
 	t.Cleanup(func() { _ = p.Close() })
 	ad := weft.New(p.Runtime)
 	ad.AllowedOperations = map[string]struct{}{"document.read": {}}
@@ -50,7 +51,7 @@ func TestWeftAllowlistBlocks(t *testing.T) {
 }
 
 func TestWeftBypassHeaderDenied(t *testing.T) {
-	p, _ := bootstrap.NewPlatform(bootstrap.Config{PolicySyncInterval: -1, DisableSeedPolicyPublish: true})
+	p, _ := bootstrap.NewPlatform(bootstrap.Config{PolicySyncInterval: -1, DisableSeedPolicyPublish: true, DemoTokens: testtokens.Demo()})
 	t.Cleanup(func() { _ = p.Close() })
 	ad := weft.New(p.Runtime)
 	resp, _ := ad.Invoke(context.Background(), weft.StepCall{

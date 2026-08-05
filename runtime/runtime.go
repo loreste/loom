@@ -30,6 +30,12 @@ import (
 )
 
 // Dependencies for the runtime. Missing security deps fail closed at Execute.
+// TenantResolver binds a verified identity claim to the requested boundary.
+// Implementations must reject missing or conflicting tenant context.
+type TenantResolver interface {
+	Resolve(context.Context, core.Identity, core.BoundaryID) (core.BoundaryID, error)
+}
+
 type Dependencies struct {
 	Registry    *core.Registry
 	Verifier    identity.Verifier
@@ -50,6 +56,9 @@ type Dependencies struct {
 	// AllowAnonymous is false by default. If true, empty credentials get a synthetic
 	// unauthenticated identity that still must pass policy (almost always deny).
 	AllowAnonymous bool
+	// Tenant runs after authentication/delegation and before boundary
+	// authorization. Its resolved boundary is used by all later gates.
+	Tenant TenantResolver
 
 	// Clock for tests; nil = time.Now.
 	Clock func() time.Time
@@ -179,6 +188,16 @@ func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Res
 			return rt.deny(ctx, req, id, nil, core.RiskLow, "delegation", core.ReasonInvalidDelegation, err.Error(), start, "")
 		}
 		id = delegated
+	}
+
+	// Tenant claim resolution must happen before boundary authorization so the
+	// resolved value is carried through every subsequent gate and audit record.
+	if rt.deps.Tenant != nil {
+		resolved, err := rt.deps.Tenant.Resolve(ctx, id, req.Boundary)
+		if err != nil {
+			return rt.deny(ctx, req, id, nil, core.RiskLow, "tenant", core.ReasonBoundaryViolation, err.Error(), start, "")
+		}
+		req.Boundary = resolved
 	}
 
 	// 3. Boundary
@@ -359,7 +378,7 @@ func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Res
 		// Fail closed: empty output rather than leak
 		filtered = map[string]any{}
 	}
-	filtered = guardrails.RedactSecrets(filtered)
+	filtered = guardrails.RedactSecretPatterns(filtered)
 
 	// 15. Audit allow. Fail closed: an emit error converts the allow into a
 	// deny (ReasonInternal, no output; the handler's side effects already
@@ -481,6 +500,7 @@ func (rt *Runtime) audit(
 		Principal:  string(id.ID),
 		Delegator:  string(id.Delegator),
 		Boundary:   string(req.Boundary),
+		TenantID:   string(req.Boundary),
 		Operation:  opName,
 		Resource:   res,
 		Risk:       riskLevel.String(),

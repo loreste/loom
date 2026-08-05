@@ -2,6 +2,7 @@ package audit_test
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -67,5 +68,27 @@ func TestEmitScrubsSecretInMetadataValues(t *testing.T) {
 	}
 	if got := sink.Snapshot()[0].Metadata["note"]; strings.Contains(got, secret) {
 		t.Fatalf("secret leaked into metadata value: %q", got)
+	}
+}
+
+func TestEmitRedactsNestedCredentialKeys(t *testing.T) {
+	sink := &audit.MemorySink{}
+	logger := audit.NewLogger(sink)
+	if _, err := logger.Emit(context.Background(), audit.Event{
+		Input: map[string]any{
+			"credentials": map[string]any{
+				"password": "hunter2",
+				"username": "alice",
+			},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(sink.Snapshot()[0].Input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "hunter2") {
+		t.Fatalf("nested credential leaked: %s", raw)
 	}
 }

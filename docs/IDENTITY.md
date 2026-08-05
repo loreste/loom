@@ -29,3 +29,12 @@ development secret outside an isolated development fixture.
 
 Identity authentication does not grant an operation by itself. Loom still
 requires explicit policy, boundary membership, resource ACL, and field grants.
+The CLI can enable tenant binding when the verified JWT contains a tenant
+claim:
+
+```bash
+export LOOM_TENANT_CLAIM=tenant_id
+```
+
+Use the equivalent `tenancy.NewResolver` and `JWTConfig.ClaimAttributes`
+configuration when embedding Loom.

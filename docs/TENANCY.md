@@ -1,82 +1,99 @@
-# Tenant isolation (boundaries + databases)
+# Tenancy and tenant isolation
 
-Loom enforces **application-layer** isolation via `BoundaryID`, policy, and
-resource ACLs. It does **not** automatically rewrite SQL with a tenant predicate
-or enable Postgres RLS for you.
+Loom treats a tenant as a verified boundary. A request may name a boundary,
+but the caller cannot choose a different tenant just by changing that value.
+When tenant claim resolution is enabled, the verified identity claim and the
+requested boundary must match before policy, resources, quotas, approvals, or
+handlers run.
 
-## What Loom guarantees
+Loom provides the application-layer part of tenant isolation. PostgreSQL RLS,
+database roles, and tenant-aware transactions provide the database-layer part.
+Use both for shared tables.
 
-| Layer | Behavior |
-|-------|----------|
-| Boundary membership | Principal must be granted the request boundary |
-| Policy | Explicit allow rules (often scoped to boundary) |
-| Resource ACL | `type`/`id` grants per principal + boundary |
-| DB pool pin | Optional `AllowedBoundaries` on a pool |
-| Table allowlist | Optional `AllowedTables` on a pool |
-| SQL class | Fail-closed classifier (no DDL/multi-stmt/…) |
+## Configure the tenant claim
 
-## What you must still design
-
-**Row-level multi-tenancy** when many tenants share one schema/table:
-
-1. **Preferred: pool or schema per tenant** (or per boundary group)
-2. **Or: Postgres RLS** with `SET LOCAL app.boundary = …` in handlers before queries
-3. **Never** rely on Loom alone if `SELECT * FROM orders` can return other tenants’ rows
-
-## Pattern A — Pool per boundary (embed)
+Map a claim from the production identity verifier into `Identity.Attributes`,
+then configure the runtime resolver:
 
 ```go
-a.OpenDB("tenant_acme", "pgx", dsnAcme, db.Options{
-    AllowedTables:     []string{"orders"},
-    AllowedBoundaries: []core.BoundaryID{"acme"},
+verifier, err := identity.NewJWTVerifier(identity.JWTConfig{
+    Secrets:        managedSecrets,
+    Issuer:         issuer,
+    Audience:       audience,
+    ClaimAttributes: map[string]string{"tenant_id": "tenant_id"},
 })
-a.OpenDB("tenant_globex", "pgx", dsnGlobex, db.Options{
-    AllowedTables:     []string{"orders"},
-    AllowedBoundaries: []core.BoundaryID{"globex"},
+if err != nil { return err }
+
+tenantResolver, err := tenancy.NewResolver("tenant_id")
+if err != nil { return err }
+
+a, err := app.New(app.Config{
+    IdentityVerifier: verifier,
+    TenantResolver:   tenantResolver,
 })
-// Handlers pick pool from identity.Boundary — never from untrusted input alone.
 ```
 
-## Pattern B — Shared DB + RLS (Postgres)
+The resolver requires a non-empty request boundary and rejects missing or
+conflicting claims. Do not resolve a tenant from request metadata, a resource
+ID, or a client-selected database pool.
 
-At process start (migrations / superuser):
+## Bind PostgreSQL RLS to the transaction
+
+Configure shared tenant pools with `RequireTenantContext`:
+
+```go
+_ = a.OpenDB("main", "pgx", databaseURL, db.Options{
+    AllowedTables:        []string{"tenant_orders"},
+    AllowedBoundaries:    []core.BoundaryID{"tenant-a", "tenant-b"},
+    RequireTenantContext: true,
+    TenantSetting:        "app.tenant_id",
+})
+```
+
+For environment-driven application database wiring, the equivalent settings
+are:
+
+```bash
+export LOOM_APP_DB_REQUIRE_TENANT_RLS=true
+export LOOM_APP_DB_TENANT_SETTING=app.tenant_id
+```
+
+Handlers use `BeginTenant` or `BeginScoped`. Loom binds the verified boundary
+with PostgreSQL transaction-local state before the first product query. A
+governed query cannot call `set_config` to change it, and direct pooled queries
+are refused for a tenant-bound pool.
+
+The complete migration is in [`examples/tenancy/rls.sql`](../examples/tenancy/rls.sql).
+The application database role must not own the tables and must not have
+`BYPASSRLS`.
+
+For product operations, also include the tenant column in fixed SQL predicates.
+RLS is the database backstop; explicit predicates make intent and query review
+clear:
 
 ```sql
-ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
-CREATE POLICY orders_boundary ON orders
-  USING (boundary_id = current_setting('app.boundary', true));
+SELECT id, sku, status
+FROM tenant_orders
+WHERE tenant_id = $1 AND id = $2
 ```
 
-In the product handler (after Loom has authorized the call):
+## Administrative access
 
-```go
-ex, err := deps.DBs.ExecutorFor(pool, ec.Identity, ec.Boundary)
-// Use a short transaction; set session GUC then query via Executor.
-_, err = ex.Exec(ctx, `SELECT set_config('app.boundary', ?, true)`, string(ec.Boundary))
-// Then fixed parameterized SQL only — still through Executor / SQL guard.
-```
+Break-glass access is a separate operation. It must have an explicit policy,
+short-lived identity, approval, a declared target tenant, and an audit record.
+Do not make tenant-wide access a wildcard policy or a special request header.
 
-Notes:
+## Required tests
 
-- Use a **non-superuser** app role that cannot bypass RLS.
-- `set_config` must not be exposable via free-form `db.query` to untrusted clients.
-- Prefer product ops (`order.list`) over governed free-form SQL for multi-tenant apps.
+Every tenant-aware application should test that:
 
-## Pattern C — Product ops only (recommended)
+- tenant A cannot read or write tenant B;
+- missing and conflicting claims are denied;
+- a tenant-bound transaction cannot change its tenant setting;
+- product operations do not select a pool solely from caller input;
+- break-glass access requires its separate policy and approval; and
+- audit events contain both the resolved boundary and `tenant_id`.
 
-Callers never send SQL. Handlers hard-code parameterized statements and always
-filter by `ec.Boundary` / `ec.Identity.ID`:
-
-```go
-ex.Query(ctx, `SELECT id, sku FROM orders WHERE boundary = ? AND id = ?`,
-    string(ec.Boundary), orderID)
-```
-
-This is the default path for `domains/orders` and `examples/orders-app`.
-
-## Checklist
-
-- [ ] Every durable table has a tenant/boundary column **or** lives in a tenant-scoped DB
-- [ ] Handlers never take pool name solely from client input without allowlisting
-- [ ] `db.query` / `db.exec` not granted to end-user product principals
-- [ ] Production: `LOOM_DISABLE_DEMO_PRINCIPALS=true`, durable stores, strong JWT secret
+The repository includes resolver, runtime, audit, SQL function, and tenant-bound
+pool tests. PostgreSQL integration tests should additionally run the RLS
+migration against a non-owner, non-`BYPASSRLS` role.

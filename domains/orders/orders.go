@@ -114,8 +114,9 @@ func Migrations() []db.Migration {
 			Version: 1,
 			Name:    "orders_init",
 			Up: `CREATE TABLE IF NOT EXISTS orders (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  customer TEXT NOT NULL,
+	 id INTEGER PRIMARY KEY AUTOINCREMENT,
+	 tenant_id TEXT NOT NULL,
+	 customer TEXT NOT NULL,
   sku TEXT NOT NULL,
   qty INTEGER NOT NULL,
   status TEXT NOT NULL,
@@ -128,8 +129,9 @@ func Migrations() []db.Migration {
 // SchemaSQL is a convenience single-shot DDL for demos (prefer Migrations()).
 const SchemaSQL = `
 CREATE TABLE IF NOT EXISTS orders (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  customer TEXT NOT NULL,
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ tenant_id TEXT NOT NULL,
+ customer TEXT NOT NULL,
   sku TEXT NOT NULL,
   qty INTEGER NOT NULL,
   status TEXT NOT NULL,
@@ -149,7 +151,7 @@ func handleCreate(ec *core.ExecutionContext, deps Deps) (*core.Result, error) {
 		return nil, err
 	}
 	// Prefer transaction for multi-step future inventory checks.
-	tx, err := ex.Begin(ec.Ctx)
+	tx, err := ex.BeginScoped(ec.Ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -159,9 +161,9 @@ func handleCreate(ec *core.ExecutionContext, deps Deps) (*core.Result, error) {
 	// Dialect-aware insert: Postgres RETURNING / SQLite last_insert_rowid.
 	// Column names are fixed identifiers — never caller-controlled.
 	row, err := tx.InsertReturning(ec.Ctx, db.InsertOpts{
-		Table:   "orders",
-		Columns: []string{"customer", "sku", "qty", "status", "created_at"},
-		Values:  []any{customer, sku, qty, "created", now},
+		Table:     "orders",
+		Columns:   []string{"tenant_id", "customer", "sku", "qty", "status", "created_at"},
+		Values:    []any{string(ec.Boundary), customer, sku, qty, "created", now},
 		Returning: []string{"id", "customer", "sku", "qty", "status", "created_at"},
 	})
 	if err != nil {
@@ -193,8 +195,8 @@ func handleGet(ec *core.ExecutionContext, deps Deps) (*core.Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	rs, err := ex.Query(ec.Ctx,
-		`SELECT id, customer, sku, qty, status, created_at FROM orders WHERE id = ?`, id)
+	rs, err := ex.QueryScoped(ec.Ctx,
+		`SELECT id, customer, sku, qty, status, created_at FROM orders WHERE tenant_id = ? AND id = ?`, string(ec.Boundary), id)
 	if err != nil {
 		return nil, err
 	}
@@ -220,12 +222,12 @@ func handleList(ec *core.ExecutionContext, deps Deps) (*core.Result, error) {
 	customer, _ := ec.Input["customer"].(string)
 	var rs *db.ResultSet
 	if customer != "" {
-		rs, err = ex.Query(ec.Ctx,
-			`SELECT id, customer, sku, qty, status, created_at FROM orders WHERE customer = ? ORDER BY id DESC`,
-			customer)
+		rs, err = ex.QueryScoped(ec.Ctx,
+			`SELECT id, customer, sku, qty, status, created_at FROM orders WHERE tenant_id = ? AND customer = ? ORDER BY id DESC`,
+			string(ec.Boundary), customer)
 	} else {
-		rs, err = ex.Query(ec.Ctx,
-			`SELECT id, customer, sku, qty, status, created_at FROM orders ORDER BY id DESC`)
+		rs, err = ex.QueryScoped(ec.Ctx,
+			`SELECT id, customer, sku, qty, status, created_at FROM orders WHERE tenant_id = ? ORDER BY id DESC`, string(ec.Boundary))
 	}
 	if err != nil {
 		return nil, err

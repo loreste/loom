@@ -246,3 +246,27 @@ func TestPostgresPolicyStalePublish(t *testing.T) {
 		t.Fatalf("version = %d, want 2 (stale publish must not win)", loaded.Version)
 	}
 }
+func TestPostgresConcurrentMigrations(t *testing.T) {
+	ctx := context.Background()
+	databaseURL := dsn(t)
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			<-start
+			db, err := postgres.Open(databaseURL)
+			if err != nil {
+				results <- err
+				return
+			}
+			defer db.Close()
+			results <- postgres.Migrate(ctx, db)
+		}()
+	}
+	close(start)
+	for i := 0; i < 2; i++ {
+		if err := <-results; err != nil {
+			t.Fatalf("concurrent migration failed: %v", err)
+		}
+	}
+}

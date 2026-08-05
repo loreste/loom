@@ -26,6 +26,9 @@ type Config struct {
 	JWTKeyID    string
 	JWTIssuer   string
 	JWTAudience string
+	// TenantClaim is a verified JWT claim copied into Identity.Attributes
+	// under the standard tenant_id key when tenant enforcement is enabled.
+	TenantClaim string
 	// AuditJSONL optional path.
 	AuditJSONL string
 	// PGMaxOpenConns pool size (default 20).
@@ -49,6 +52,9 @@ type Config struct {
 	PolicyPath string
 	// PolicySyncInterval e.g. 5s; empty = 5s default in bootstrap.
 	PolicySyncInterval time.Duration
+	// TrustedTLSProxy means a deployment terminates TLS before Loom. It is
+	// required explicitly before production plaintext listeners are allowed.
+	TrustedTLSProxy bool
 }
 
 // Load reads LOOM_* environment variables with safe defaults.
@@ -62,6 +68,7 @@ func Load() Config {
 		JWTKeyID:              os.Getenv("LOOM_JWT_KEY_ID"),
 		JWTIssuer:             os.Getenv("LOOM_JWT_ISSUER"),
 		JWTAudience:           os.Getenv("LOOM_JWT_AUDIENCE"),
+		TenantClaim:           os.Getenv("LOOM_TENANT_CLAIM"),
 		AuditJSONL:            os.Getenv("LOOM_AUDIT_JSONL"),
 		PGMaxOpenConns:        envInt("LOOM_PG_MAX_OPEN", 20),
 		PGMaxIdleConns:        envInt("LOOM_PG_MAX_IDLE", 5),
@@ -73,6 +80,7 @@ func Load() Config {
 		HTTPRateLimitPerMin:   envInt("LOOM_HTTP_RATE_LIMIT", 0),
 		PolicyPath:            os.Getenv("LOOM_POLICY_PATH"),
 		PolicySyncInterval:    ParseDurationEnv("LOOM_POLICY_SYNC_INTERVAL", 5*time.Second),
+		TrustedTLSProxy:       envBool("LOOM_TRUSTED_TLS_PROXY", false),
 	}
 	return c
 }

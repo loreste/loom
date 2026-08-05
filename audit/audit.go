@@ -30,6 +30,7 @@ type Event struct {
 	Principal string    `json:"principal,omitempty"`
 	Delegator string    `json:"delegator,omitempty"`
 	Boundary  string    `json:"boundary,omitempty"`
+	TenantID  string    `json:"tenant_id,omitempty"`
 	Operation string    `json:"operation"`
 	Resource  string    `json:"resource,omitempty"`
 	Risk      string    `json:"risk,omitempty"`
@@ -86,10 +87,10 @@ func (m *MemorySink) Snapshot() []Event {
 
 // WriterSink JSON-encodes events to an io.Writer (stdout, file).
 type WriterSink struct {
-	mu       sync.Mutex
-	w        io.Writer
-	enc      *json.Encoder
-	durable  bool
+	mu      sync.Mutex
+	w       io.Writer
+	enc     *json.Encoder
+	durable bool
 }
 
 // Durable reports whether the writer is configured. Durability of the target

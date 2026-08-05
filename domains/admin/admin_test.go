@@ -90,6 +90,55 @@ func toolNames(t *testing.T, resp core.Response) []string {
 	return names
 }
 
+func TestApprovalIssueRejectsCrossBoundaryAndUnknownTargets(t *testing.T) {
+	s := setup(t)
+	if err := s.Verifier.Register(identity.StaticPrincipal{
+		ID:           "user:approver",
+		Type:         "user",
+		Boundary:     "dev",
+		Token:        "issuer-token",
+		Capabilities: []string{"approval.issue"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Boundary.Grant("user:approver", "dev"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Policy.AddRule(policy.Rule{
+		Principal: "user:approver", Boundary: "dev", Operation: admin.OpApprovalIssue,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Fields.GrantFields("user:approver", "dev", admin.OpApprovalIssue, []string{"*"}); err != nil {
+		t.Fatal(err)
+	}
+
+	base := core.Request{
+		Operation:   admin.OpApprovalIssue,
+		Credentials: core.Credentials{Token: "issuer-token"},
+		Boundary:    "dev",
+		Input: map[string]any{
+			"principal":      "user:target",
+			"operation":      "payment.capture",
+			"boundary":       "prod",
+			"generate_token": true,
+		},
+		IdempotencyKey: "scope-cross-boundary",
+	}
+	resp := s.Runtime.Execute(context.Background(), base)
+	if resp.Allowed {
+		t.Fatal("approval issuance must not cross the issuer boundary")
+	}
+
+	base.Input["operation"] = "unknown.operation"
+	base.Input["boundary"] = "dev"
+	base.IdempotencyKey = "scope-unknown-operation"
+	resp = s.Runtime.Execute(context.Background(), base)
+	if resp.Allowed {
+		t.Fatal("approval issuance must not target an unknown operation")
+	}
+}
+
 func TestCatalogSpecFilteredByCapabilities(t *testing.T) {
 	s := setup(t)
 	resp := callSpec(t, s, "agent-token")

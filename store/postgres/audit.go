@@ -41,17 +41,17 @@ func (s *AuditSink) Write(ctx context.Context, ev audit.Event) error {
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO loom_audit (
 			id, ts, trace_id, decision, reason, step, message,
-			principal, delegator, boundary, operation, resource, risk,
+			principal, delegator, boundary, tenant_id, operation, resource, risk,
 			input, metadata, duration_ms, auth_method
 		) VALUES (
 			$1,$2,$3,$4,$5,$6,$7,
-			$8,$9,$10,$11,$12,$13,
-			$14,$15,$16,$17
+			$8,$9,$10,$11,$12,$13,$14,
+			$15,$16,$17,$18
 		)
 		ON CONFLICT (id) DO NOTHING
 	`,
 		ev.ID, ev.Timestamp.UTC(), ev.TraceID, ev.Decision, ev.Reason, ev.Step, ev.Message,
-		ev.Principal, ev.Delegator, ev.Boundary, ev.Operation, ev.Resource, ev.Risk,
+		ev.Principal, ev.Delegator, ev.Boundary, ev.TenantID, ev.Operation, ev.Resource, ev.Risk,
 		inRaw, mdRaw, ev.DurationMS, ev.AuthMethod,
 	)
 	return err

@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
@@ -54,8 +55,11 @@ type Platform struct {
 	AuditSink   *audit.MemorySink
 	// JWTSecret used for minting demo tokens (dev only).
 	JWTSecret []byte
-	Docs      *document.Store
-	DataDir   string
+	// DemoTokens contains process-local development credentials generated at
+	// startup or explicitly supplied by the caller.
+	DemoTokens map[core.PrincipalID]string
+	Docs       *document.Store
+	DataDir    string
 	// DB is set when DatabaseURL is configured.
 	DB *sql.DB
 	// Redis client when RedisURL is set.
@@ -83,7 +87,10 @@ type Config struct {
 	JWTKeyID    string
 	JWTIssuer   string
 	JWTAudience string
-	AuditJSONL  string
+	// JWTClaimAttributes maps verified JWT claims into Identity.Attributes.
+	// It is useful for tenant claims and other policy inputs.
+	JWTClaimAttributes map[string]string
+	AuditJSONL         string
 	// DataDir file stores; ignored when DatabaseURL set.
 	DataDir string
 	// DatabaseURL Postgres DSN.
@@ -102,16 +109,20 @@ type Config struct {
 	PolicySyncInterval time.Duration
 	// SeedPolicyPublish if true (default), publishes local seed as version 1 when store empty.
 	DisableSeedPolicyPublish bool
-	// DisableDemoPrincipals skips seeding the publicly-known demo bearer tokens
-	// (alice-secret-token etc.) and their demo policy/resource/field grants.
-	// These tokens are published in this repository and carry real capabilities,
-	// so they are a backdoor in any shared environment: set this for anything
-	// beyond local dev. Default (false) keeps demo seeding for tests and demos.
+	// DisableDemoPrincipals skips seeding development bearer principals and their
+	// demo policy/resource/field grants. Enable this for shared or production
+	// environments; development tokens are generated per process by default.
 	DisableDemoPrincipals bool
+	// DemoTokens optionally supplies local-development credentials. Omitted
+	// principals receive cryptographically random tokens at startup.
+	DemoTokens map[string]string
 	// RequireDurable marks a production-ish deployment (mirrors
 	// config.Config.RequireDurable / LOOM_REQUIRE_DURABLE). When set,
 	// NewPlatform refuses to start unless DisableDemoPrincipals is also set.
 	RequireDurable bool
+	// TenantResolver binds a verified identity tenant claim to each request
+	// boundary. Leave nil for applications that do not use tenant claims.
+	TenantResolver runtime.TenantResolver
 }
 
 // NewPlatform builds deny-by-default stack with demo principals and domain ops.
@@ -148,9 +159,10 @@ func NewPlatform(cfg Config) (*Platform, error) {
 	reg := core.NewRegistry()
 	mem := identity.NewMemoryVerifier()
 	jwt, err := identity.NewJWTVerifier(identity.JWTConfig{
-		Secrets:  map[string][]byte{cfg.JWTKeyID: secret},
-		Issuer:   cfg.JWTIssuer,
-		Audience: cfg.JWTAudience,
+		Secrets:         map[string][]byte{cfg.JWTKeyID: secret},
+		Issuer:          cfg.JWTIssuer,
+		Audience:        cfg.JWTAudience,
+		ClaimAttributes: cfg.JWTClaimAttributes,
 	})
 	if err != nil {
 		return nil, err
@@ -301,6 +313,7 @@ func NewPlatform(cfg Config) (*Platform, error) {
 		Idempotency: idem,
 		Audit:       auditLogger,
 		Observer:    metrics,
+		Tenant:      cfg.TenantResolver,
 	})
 	if err != nil {
 		if auditFile != nil {
@@ -340,6 +353,7 @@ func NewPlatform(cfg Config) (*Platform, error) {
 		Idempotency: idem,
 		AuditSink:   memSink,
 		JWTSecret:   secret,
+		DemoTokens:  make(map[core.PrincipalID]string),
 		Docs:        document.NewStore(),
 		DataDir:     cfg.DataDir,
 		DB:          db,
@@ -382,7 +396,7 @@ func NewPlatform(cfg Config) (*Platform, error) {
 		}
 	}
 	if !cfg.DisableDemoPrincipals {
-		if err := p.seedDemoPrincipals(); err != nil {
+		if err := p.seedDemoPrincipals(cfg.DemoTokens); err != nil {
 			_ = p.Close()
 			return nil, err
 		}
@@ -480,28 +494,71 @@ func (p *Platform) registerDomains() error {
 	})
 }
 
-func (p *Platform) seedDemoPrincipals() error {
+func (p *Platform) demoToken(configured map[string]string, id core.PrincipalID) (string, error) {
+	if token := configured[string(id)]; token != "" {
+		p.DemoTokens[id] = token
+		return token, nil
+	}
+	raw := make([]byte, 24)
+	if _, err := rand.Read(raw); err != nil {
+		return "", fmt.Errorf("generate demo token for %s: %w", id, err)
+	}
+	token := "loom-dev-" + hex.EncodeToString(raw)
+	p.DemoTokens[id] = token
+	return token, nil
+}
+
+// DemoToken returns a generated or configured development token. It is
+// intentionally unavailable when demo principals are disabled.
+func (p *Platform) DemoToken(id core.PrincipalID) string {
+	if p == nil {
+		return ""
+	}
+	return p.DemoTokens[id]
+}
+
+func (p *Platform) seedDemoPrincipals(configured map[string]string) error {
+	aliceToken, err := p.demoToken(configured, "user:alice")
+	if err != nil {
+		return err
+	}
+	bobToken, err := p.demoToken(configured, "user:bob")
+	if err != nil {
+		return err
+	}
+	opsToken, err := p.demoToken(configured, "user:ops")
+	if err != nil {
+		return err
+	}
+	approverToken, err := p.demoToken(configured, "user:approver")
+	if err != nil {
+		return err
+	}
+	agentToken, err := p.demoToken(configured, "agent:assistant")
+	if err != nil {
+		return err
+	}
 	if err := p.Memory.Register(identity.StaticPrincipal{
-		ID: "user:alice", Type: "user", Boundary: "dev", Token: "alice-secret-token",
+		ID: "user:alice", Type: "user", Boundary: "dev", Token: aliceToken,
 		// catalog.spec lets agents discover callable tools for this principal.
 		Capabilities: []string{"document.read", "document.write", "ai.complete", "catalog.spec"},
 	}); err != nil {
 		return err
 	}
 	if err := p.Memory.Register(identity.StaticPrincipal{
-		ID: "user:bob", Type: "user", Boundary: "dev", Token: "bob-finance-token",
+		ID: "user:bob", Type: "user", Boundary: "dev", Token: bobToken,
 		Capabilities: []string{"payment.capture", "payment.refund", "document.read", "catalog.spec"},
 	}); err != nil {
 		return err
 	}
 	if err := p.Memory.Register(identity.StaticPrincipal{
-		ID: "user:ops", Type: "user", Boundary: "staging", Token: "ops-deploy-token",
+		ID: "user:ops", Type: "user", Boundary: "staging", Token: opsToken,
 		Capabilities: []string{"deployment.release", "server.restart", "document.read", "catalog.spec"},
 	}); err != nil {
 		return err
 	}
 	if err := p.Memory.Register(identity.StaticPrincipal{
-		ID: "user:approver", Type: "user", Boundary: "dev", Token: "approver-admin-token",
+		ID: "user:approver", Type: "user", Boundary: "dev", Token: approverToken,
 		Capabilities: []string{
 			"approval.issue", "catalog.list", "catalog.spec", "document.read",
 			"policy.publish", "policy.get",
@@ -510,7 +567,7 @@ func (p *Platform) seedDemoPrincipals() error {
 		return err
 	}
 	if err := p.Memory.Register(identity.StaticPrincipal{
-		ID: "agent:assistant", Type: "agent", Boundary: "dev", Token: "agent-token-dev",
+		ID: "agent:assistant", Type: "agent", Boundary: "dev", Token: agentToken,
 		Capabilities: []string{"ai.complete", "ai.tool_call", "document.read", "catalog.spec"},
 	}); err != nil {
 		return err

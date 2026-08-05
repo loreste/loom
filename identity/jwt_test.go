@@ -49,6 +49,32 @@ func TestJWTHappyPath(t *testing.T) {
 	}
 }
 
+func TestJWTMapsConfiguredAttributes(t *testing.T) {
+	secret := []byte("0123456789abcdef0123456789abcdef")
+	v, err := identity.NewJWTVerifier(identity.JWTConfig{
+		Secrets:         map[string][]byte{"": secret},
+		ClaimAttributes: map[string]string{"tenant_id": "tid"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tok, err := identity.MintHS256(secret, "", map[string]any{
+		"sub": "user:tenant-a",
+		"exp": time.Now().Add(time.Hour).Unix(),
+		"tid": "tenant-a",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := v.Authenticate(context.Background(), core.Credentials{Token: tok})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id.Attributes["tenant_id"] != "tenant-a" {
+		t.Fatalf("tenant claim was not mapped: %#v", id.Attributes)
+	}
+}
+
 func TestJWTRejectsAlgNone(t *testing.T) {
 	secret := []byte("0123456789abcdef0123456789abcdef")
 	v, err := identity.NewJWTVerifier(identity.JWTConfig{

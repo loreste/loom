@@ -65,3 +65,10 @@ func TestAppDBDriverGuesses(t *testing.T) {
 		}
 	}
 }
+
+func TestAppDBTenantRLSRequiresPostgres(t *testing.T) {
+	cfg := config.AppDB{URL: "file:tenant.db", Driver: "sqlite", Pool: "main", RequireTenantRLS: true}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("tenant RLS must reject non-PostgreSQL databases")
+	}
+}

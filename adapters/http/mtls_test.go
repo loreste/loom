@@ -3,6 +3,7 @@ package http_test
 import (
 	"bytes"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -158,5 +159,24 @@ func TestMTLSUnknownCertDenied(t *testing.T) {
 	defer res.Body.Close()
 	if res.StatusCode == 200 {
 		t.Fatal("unknown cert must not allow")
+	}
+}
+
+func TestExtractCredentialsRejectsUnverifiedPeerCertificate(t *testing.T) {
+	bundle, err := tlstest.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "https://loom.test/v1/execute", nil)
+	req.TLS = &tls.ConnectionState{PeerCertificates: []*x509.Certificate{bundle.ClientX509}}
+	if _, err := loomhttp.ExtractCredentials(req, true); err == nil {
+		t.Fatal("unverified peer certificate must not satisfy required mTLS")
+	}
+	creds, err := loomhttp.ExtractCredentials(req, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if creds.Token != "" || creds.Scheme != "" {
+		t.Fatalf("unverified certificate must not become credentials: %+v", creds)
 	}
 }

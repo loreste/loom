@@ -39,6 +39,10 @@ type ServerConfig struct {
 	RequireMTLS bool
 	// TLSConfig optional; when set, ListenAndServeTLS uses it.
 	TLSConfig *tls.Config
+	// RequireTLS refuses a plaintext ListenAndServe call. Direct production
+	// listeners should use ListenAndServeTLS; proxy termination must be an
+	// explicit deployment decision outside this adapter.
+	RequireTLS bool
 	// Logger optional.
 	Logger *log.Logger
 	// Ready probes whether backend deps are ready (optional).
@@ -57,6 +61,11 @@ type ServerConfig struct {
 	// Metrics exposes GET /metrics when configured. The collector is optional
 	// so embedding applications can choose their own telemetry bridge.
 	Metrics *runtime.Metrics
+	// MetricsAuth authorizes access to /metrics. When nil, metrics are denied
+	// unless MetricsPublic is explicitly true.
+	MetricsAuth func(*http.Request) bool
+	// MetricsPublic explicitly permits unauthenticated metrics exposure.
+	MetricsPublic bool
 }
 
 // Server is the hardened HTTP adapter.
@@ -313,7 +322,13 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	if !s.Config.MetricsPublic {
+		if s.Config.MetricsAuth == nil || !s.Config.MetricsAuth(r) {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "metrics authorization required"})
+			return
+		}
+	}
 	w.Header().Set(core.ProtocolHeader, core.ProtocolVersion)
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 	w.WriteHeader(http.StatusOK)
@@ -431,11 +446,18 @@ func ExtractCredentials(r *http.Request, requireMTLS bool) (core.Credentials, er
 	}
 	// Prefer mTLS when client cert present
 	if r.TLS != nil && len(r.TLS.PeerCertificates) > 0 {
-		leaf := r.TLS.PeerCertificates[0]
-		creds := identity.CredentialsFromCertificate(leaf)
-		auth := r.Header.Get("Authorization")
-		if requireMTLS || auth == "" {
-			return creds, nil
+		// PeerCertificates contains presented certificates even when the TLS
+		// server only requested a client certificate. VerifiedChains proves
+		// that the configured trust policy accepted the peer.
+		if len(r.TLS.VerifiedChains) > 0 {
+			leaf := r.TLS.PeerCertificates[0]
+			creds := identity.CredentialsFromCertificate(leaf)
+			auth := r.Header.Get("Authorization")
+			if requireMTLS || auth == "" {
+				return creds, nil
+			}
+		} else if requireMTLS {
+			return core.Credentials{}, fmt.Errorf("mtls peer certificate was not verified")
 		}
 		// Both presented without RequireMTLS: bearer only (not combined).
 	}
@@ -518,6 +540,9 @@ func (s *Server) Handler() http.Handler {
 
 // ListenAndServe starts the server (blocking).
 func (s *Server) ListenAndServe() error {
+	if s.Config.RequireTLS {
+		return fmt.Errorf("loom http: plaintext listener refused; use ListenAndServeTLS or configure a trusted TLS proxy")
+	}
 	if s.Config.Logger != nil {
 		s.Config.Logger.Printf("loom http listening on %s", s.Config.Addr)
 	}

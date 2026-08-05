@@ -271,10 +271,10 @@ func num(v any) (float64, bool) {
 // operations are denied. Set Unlimited explicitly to opt out of ceilings.
 type FinancialGuard struct {
 	// MaxAmount absolute ceiling for input field "amount" (or AmountField).
-	MaxAmount    float64
-	AmountField  string
+	MaxAmount   float64
+	AmountField string
 	// Unlimited explicitly disables ceilings (zero-value guard is deny, not unlimited).
-	Unlimited      bool
+	Unlimited bool
 	// MaxByPrincipal optional per-principal ceilings.
 	MaxByPrincipal map[core.PrincipalID]float64
 	mu             sync.RWMutex
@@ -700,6 +700,48 @@ func containsSecret(v any) bool {
 	return false
 }
 
+func hasNonEmptyValue(v any) bool {
+	switch t := v.(type) {
+	case nil:
+		return false
+	case string:
+		return strings.TrimSpace(t) != ""
+	case map[string]any:
+		return len(t) > 0
+	case []any:
+		return len(t) > 0
+	default:
+		return true
+	}
+}
+
+func isSensitiveScalar(v any) bool {
+	switch v.(type) {
+	case map[string]any, map[string]string, []any, []string:
+		return false
+	default:
+		return hasNonEmptyValue(v)
+	}
+}
+
+// sensitiveFieldName is intentionally conservative. It is used for both
+// input rejection and audit/output redaction, so a false positive is safer
+// than persisting a credential under an application-specific field name.
+func sensitiveFieldName(name string) bool {
+	name = strings.ToLower(strings.TrimSpace(name))
+	for _, fragment := range []string{
+		"password", "passwd", "secret", "token", "api_key", "apikey",
+		"authorization", "cookie", "private_key", "client_secret",
+		"access_key", "refresh_token", "credential", "dsn",
+		"connection_string",
+	} {
+		if strings.Contains(name, fragment) {
+			return true
+		}
+	}
+	return false
+}
+
 // ScrubString redacts secret-like substrings from s (used for audit messages).
 func ScrubString(s string) string {
 	if s == "" {
@@ -717,6 +759,18 @@ func redactValue(v any) any {
 		return t
 	case map[string]any:
 		return RedactSecrets(t)
+	case map[string]string:
+		out := make(map[string]string, len(t))
+		for k, value := range t {
+			if sensitiveFieldName(k) && strings.TrimSpace(value) != "" {
+				out[k] = "[REDACTED]"
+			} else if secretValuePattern.MatchString(value) {
+				out[k] = "[REDACTED]"
+			} else {
+				out[k] = value
+			}
+		}
+		return out
 	case []any:
 		out := make([]any, len(t))
 		for i, e := range t {
@@ -745,9 +799,68 @@ func RedactSecrets(m map[string]any) map[string]any {
 	}
 	out := make(map[string]any, len(m))
 	for k, v := range m {
-		out[k] = redactValue(v)
+		if sensitiveFieldName(k) && isSensitiveScalar(v) {
+			out[k] = "[REDACTED]"
+		} else {
+			out[k] = redactValue(v)
+		}
 	}
 	return out
+}
+
+// RedactSecretPatterns preserves explicitly generated values such as an
+// approval token while still removing known secret-shaped strings. Audit
+// logging uses RedactSecrets, which additionally redacts sensitive field
+// names; response filtering uses this less destructive variant.
+func RedactSecretPatterns(m map[string]any) map[string]any {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		out[k] = redactPatternValue(v)
+	}
+	return out
+}
+
+func redactPatternValue(v any) any {
+	switch t := v.(type) {
+	case string:
+		if secretValuePattern.MatchString(t) {
+			return "[REDACTED]"
+		}
+		return t
+	case map[string]any:
+		return RedactSecretPatterns(t)
+	case map[string]string:
+		out := make(map[string]string, len(t))
+		for k, value := range t {
+			if secretValuePattern.MatchString(value) {
+				out[k] = "[REDACTED]"
+			} else {
+				out[k] = value
+			}
+		}
+		return out
+	case []any:
+		out := make([]any, len(t))
+		for i, item := range t {
+			out[i] = redactPatternValue(item)
+		}
+		return out
+	case []string:
+		out := make([]string, len(t))
+		for i, item := range t {
+			if secretValuePattern.MatchString(item) {
+				out[i] = "[REDACTED]"
+			} else {
+				out[i] = item
+			}
+		}
+		return out
+	default:
+		return v
+	}
 }
 
 // DefaultChain returns a production-leaning adversarial default set.
