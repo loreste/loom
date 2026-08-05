@@ -50,6 +50,8 @@ pub struct Response {
     pub outcome: Option<String>,
     #[serde(rename = "ExecutionID")]
     pub execution_id: Option<String>,
+    #[serde(rename = "OperationVersion")]
+    pub operation_version: Option<String>,
     #[serde(rename = "ReliabilityWarning")]
     pub reliability_warning: Option<String>,
 }
@@ -134,7 +136,7 @@ impl Client {
             .post(format!("{}/v1/execute", self.base_url))
             .header(CONTENT_TYPE, "application/json")
             .header("X-Loom-Protocol-Version", "1")
-            .header(USER_AGENT, "loom-rust-sdk/0.1.3")
+            .header(USER_AGENT, "loom-rust-sdk/0.1.4")
             .json(&body);
         if !bearer.is_empty() {
             req = req.header(AUTHORIZATION, format!("Bearer {bearer}"));
@@ -152,7 +154,7 @@ impl Client {
         let res = self
             .http
             .get(format!("{}/.well-known/loom.json", self.base_url))
-            .header(USER_AGENT, "loom-rust-sdk/0.1.3")
+            .header(USER_AGENT, "loom-rust-sdk/0.1.4")
             .header("X-Loom-Protocol-Version", "1")
             .send()
             .await?;
@@ -164,7 +166,7 @@ impl Client {
         let mut req = self
             .http
             .get(format!("{}/v1/openapi.json", self.base_url))
-            .header(USER_AGENT, "loom-rust-sdk/0.1.3")
+            .header(USER_AGENT, "loom-rust-sdk/0.1.4")
             .header("X-Loom-Protocol-Version", "1");
         if !self.token.is_empty() {
             req = req.header(AUTHORIZATION, format!("Bearer {}", self.token));
@@ -180,7 +182,7 @@ impl Client {
             .post(format!("{}/mcp", self.base_url))
             .header(CONTENT_TYPE, "application/json")
             .header("X-Loom-Protocol-Version", "1")
-            .header(USER_AGENT, "loom-rust-sdk/0.1.3")
+            .header(USER_AGENT, "loom-rust-sdk/0.1.4")
             .json(&rpc);
         if !self.token.is_empty() {
             req = req.header(AUTHORIZATION, format!("Bearer {}", self.token));

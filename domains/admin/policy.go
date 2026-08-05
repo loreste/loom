@@ -47,6 +47,7 @@ func RegisterPolicy(reg *core.Registry, deps PolicyDeps) error {
 		Effects:     []core.Effect{core.EffectAdmin, core.EffectWrite},
 		Approval:    core.ApprovalPolicy{Required: true},
 		Idempotency: core.IdempotencyPolicy{Required: true, TTLSeconds: 3600},
+		Quota:       core.QuotaPolicy{Enabled: true},
 	}, func(ec *core.ExecutionContext) (*core.Result, error) {
 		return handlePolicyPublish(ec, deps)
 	}); err != nil {
@@ -114,10 +115,10 @@ func handlePolicyPublish(ec *core.ExecutionContext, deps PolicyDeps) (*core.Resu
 		deps.OnPublish(doc)
 	}
 	return &core.Result{Output: map[string]any{
-		"status":     "published",
-		"version":    ver,
-		"id":         id,
-		"rule_count": len(doc.Rules),
+		"status":       "published",
+		"version":      ver,
+		"id":           id,
+		"rule_count":   len(doc.Rules),
 		"published_by": string(ec.Identity.ID),
 	}}, nil
 }

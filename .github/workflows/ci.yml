@@ -58,7 +58,9 @@ jobs:
       - name: Integration
         env:
           LOOM_DATABASE_URL: postgres://loom:loom@127.0.0.1:5432/loom?sslmode=disable
-        run: go test ./store/postgres/ ./bootstrap/ -run Postgres -count=1
+        run: |
+          go test ./store/postgres/ -run Postgres -count=1
+          go test ./bootstrap/ -run Postgres -count=1
 
   python-sdk:
     name: python-sdk

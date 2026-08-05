@@ -58,6 +58,20 @@ if resp.Outcome == core.OutcomeExecutedUnconfirmed {
 }
 ```
 
+For remote callers, query the execution record before retrying:
+
+```bash
+curl --fail-with-body \
+  -H "Authorization: Bearer $LOOM_TOKEN" \
+  "http://127.0.0.1:8080/v1/executions/$EXECUTION_ID"
+
+curl --fail-with-body -X POST \
+  -H "Authorization: Bearer $LOOM_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"outcome":"allowed","note":"confirmed by payment provider"}' \
+  "http://127.0.0.1:8080/v1/executions/$EXECUTION_ID/reconcile"
+```
+
 ## Govern database access
 
 ## Schema and financial inputs
@@ -68,9 +82,12 @@ rejects unsupported keywords rather than silently ignoring them. Use nested
 `items`, `properties`, `required`, `additionalProperties`, enums/constants,
 length and range constraints, and declare only the keywords Loom supports.
 
-Money operations must use `core.Money` limits and include a three-letter
-currency. Do not compare payment amounts as `float64`; handlers should call
-`core.ParseMoney` and compare exact values.
+Money operations must use exact `core.Money` values. A three-letter code is only
+syntactic validation; configure `Operation.AllowedCurrencies` for accepted
+currencies, and use `FinancialGuard.MaxByCurrency` when limits differ by
+currency. Do not compare payment amounts as `float64`; use `core.ParseMoney` or
+the `core.Money` fields for exact comparisons. For signed ledger adjustments,
+use `core.MoneyDelta` rather than weakening the non-negative payment type.
 
 Input field grants are separate from output projection grants:
 

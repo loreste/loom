@@ -5,6 +5,19 @@ All notable changes to Loom are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.4] — 2026-08-05
+
+### Added
+
+- Formal bounded Loom Schema contract and validation resource limits.
+- Exact operation-version binding for handlers, policies, approvals, idempotency, responses, and execution status.
+- Execution status, reconciliation, and recording-retry APIs with execution IDs.
+- Effect-aware production capability validation, currency allow-lists, signed `MoneyDelta`, and cross-adapter conformance coverage.
+
+### Changed
+
+- Added Node.js and Weft SDK usage documentation and released SDK metadata at `0.1.4`.
+
 ## [0.1.3] — 2026-08-05
 
 ### Added

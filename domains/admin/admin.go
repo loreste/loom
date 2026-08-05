@@ -41,7 +41,8 @@ func Register(reg *core.Registry, deps Deps) error {
 		"properties":{
 			"token":{"type":"string","minLength":8,"maxLength":128},
 			"principal":{"type":"string","minLength":1,"maxLength":128},
-			"operation":{"type":"string","minLength":1,"maxLength":128},
+		"operation":{"type":"string","minLength":1,"maxLength":128},
+		"operation_version":{"type":"string","pattern":"^[0-9]+$"},
 			"boundary":{"type":"string","minLength":1,"maxLength":64},
 			"ttl_seconds":{"type":"integer","minimum":60,"maximum":86400},
 			"max_risk":{"type":"string","pattern":"^(low|medium|high|critical)$"},
@@ -63,6 +64,7 @@ func Register(reg *core.Registry, deps Deps) error {
 		// unless risk engine raises to critical.
 		Approval:        core.ApprovalPolicy{MinRisk: core.RiskCritical},
 		Idempotency:     core.IdempotencyPolicy{Required: true, TTLSeconds: 3600},
+		Quota:           core.QuotaPolicy{Enabled: true},
 		SensitiveFields: []string{"token"},
 	}, func(ec *core.ExecutionContext) (*core.Result, error) {
 		return handleIssue(ec, deps)
@@ -116,7 +118,6 @@ func Register(reg *core.Registry, deps Deps) error {
 		// callers see the same wire form.
 		raw, err := json.Marshal(specs)
 		if err != nil {
-			return nil, err
 		}
 		var out []any
 		if err := json.Unmarshal(raw, &out); err != nil {
@@ -135,6 +136,7 @@ func Register(reg *core.Registry, deps Deps) error {
 func handleIssue(ec *core.ExecutionContext, deps Deps) (*core.Result, error) {
 	principal, _ := ec.Input["principal"].(string)
 	operation, _ := ec.Input["operation"].(string)
+	operationVersion, _ := ec.Input["operation_version"].(string)
 	boundary, _ := ec.Input["boundary"].(string)
 	if principal == "" || operation == "" || boundary == "" {
 		return nil, fmt.Errorf("approval target principal, operation, and boundary are required")
@@ -142,7 +144,13 @@ func handleIssue(ec *core.ExecutionContext, deps Deps) (*core.Result, error) {
 	if deps.Registry == nil {
 		return nil, fmt.Errorf("approval registry not configured")
 	}
-	targetOp, err := deps.Registry.Get(operation)
+	var targetOp *core.Operation
+	var err error
+	if operationVersion == "" {
+		targetOp, err = deps.Registry.Get(operation)
+	} else {
+		targetOp, err = deps.Registry.GetVersion(operation, operationVersion)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("approval target operation: %w", err)
 	}
@@ -186,22 +194,31 @@ func handleIssue(ec *core.ExecutionContext, deps Deps) (*core.Result, error) {
 		maxRisk = core.ParseRiskLevel(s)
 	}
 
-	if err := deps.Approvals.Issue(token, core.PrincipalID(principal), operation, targetBoundary, maxRisk, time.Duration(ttlSec)*time.Second); err != nil {
-		return nil, err
+	var issueErr error
+	if versioned, ok := deps.Approvals.(approval.VersionedIssuer); ok {
+		issueErr = versioned.IssueVersioned(token, core.PrincipalID(principal), operation, targetOp.Version, targetBoundary, maxRisk, time.Duration(ttlSec)*time.Second)
+	} else if core.NormalizeOperationVersion(targetOp.Version) == core.DefaultOperationVersion {
+		issueErr = deps.Approvals.Issue(token, core.PrincipalID(principal), operation, targetBoundary, maxRisk, time.Duration(ttlSec)*time.Second)
+	} else {
+		issueErr = fmt.Errorf("approval issuer does not support operation versions")
+	}
+	if issueErr != nil {
+		return nil, issueErr
 	}
 
 	// Return token once — field filter may strip "token" unless granted.
 	// Admins must have field grant for token to receive it.
 	return &core.Result{
 		Output: map[string]any{
-			"status":      "issued",
-			"token":       token,
-			"principal":   principal,
-			"operation":   operation,
-			"boundary":    boundary,
-			"ttl_seconds": int64(ttlSec),
-			"max_risk":    maxRisk.String(),
-			"issued_by":   string(ec.Identity.ID),
+			"status":            "issued",
+			"token":             token,
+			"principal":         principal,
+			"operation":         operation,
+			"operation_version": targetOp.Version,
+			"boundary":          boundary,
+			"ttl_seconds":       int64(ttlSec),
+			"max_risk":          maxRisk.String(),
+			"issued_by":         string(ec.Identity.ID),
 		},
 	}, nil
 }

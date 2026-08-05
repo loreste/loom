@@ -22,6 +22,7 @@ message ExecuteRequest {
   string approval_token = 8;
   map<string, string> metadata = 9;
   string trace_id = 10;
+  string operation_version = 11;
 }
 
 message ExecuteResponse {
@@ -38,4 +39,8 @@ message ExecuteResponse {
   string audit_id = 10;
   bool idempotent_replay = 11;
   string risk = 12;
+  string operation_version = 13;
+  string outcome = 14;
+  string execution_id = 15;
+  string reliability_warning = 16;
 }

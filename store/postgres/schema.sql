@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS loom_approvals (
     token_hash  TEXT PRIMARY KEY,
     principal   TEXT NOT NULL,
     operation   TEXT NOT NULL,
+    operation_version TEXT NOT NULL DEFAULT '1',
     boundary    TEXT NOT NULL DEFAULT '',
     max_risk    INT  NOT NULL DEFAULT 3,
     expires_at  TIMESTAMPTZ NOT NULL,
@@ -20,6 +21,8 @@ CREATE TABLE IF NOT EXISTS loom_approvals (
 
 CREATE INDEX IF NOT EXISTS idx_loom_approvals_expires ON loom_approvals (expires_at);
 CREATE INDEX IF NOT EXISTS idx_loom_approvals_principal ON loom_approvals (principal);
+
+ALTER TABLE loom_approvals ADD COLUMN IF NOT EXISTS operation_version TEXT NOT NULL DEFAULT '1';
 
 CREATE TABLE IF NOT EXISTS loom_idempotency (
     key         TEXT PRIMARY KEY,

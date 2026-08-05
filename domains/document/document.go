@@ -59,14 +59,15 @@ func Register(reg *core.Registry, store *Store) error {
 		"additionalProperties":false
 	}`)
 	return reg.Register(&core.Operation{
-		Name:        OpWrite,
-		Description: "Write a document",
-		InputSchema: writeSchema,
-		Permissions: []string{"document.write"},
-		Resources:   []string{"document"},
-		Risk:        core.RiskMedium,
-		Effects:     []core.Effect{core.EffectWrite},
-		Idempotency: core.IdempotencyPolicy{Required: true, TTLSeconds: 3600},
+		Name:            OpWrite,
+		Description:     "Write a document",
+		InputSchema:     writeSchema,
+		Permissions:     []string{"document.write"},
+		Resources:       []string{"document"},
+		Risk:            core.RiskMedium,
+		Effects:         []core.Effect{core.EffectWrite},
+		Idempotency:     core.IdempotencyPolicy{Required: true, TTLSeconds: 3600},
+		Quota:           core.QuotaPolicy{Enabled: true},
 		SensitiveFields: []string{"internal_notes"},
 	}, store.handleWrite)
 }

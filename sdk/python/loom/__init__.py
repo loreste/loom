@@ -32,6 +32,7 @@ class Response:
     risk: str = ""
     outcome: str = "denied"
     execution_id: str = ""
+    operation_version: str = ""
     reliability_warning: str = ""
 
 
@@ -66,6 +67,7 @@ def _parse_response(obj: Mapping[str, Any]) -> Response:
         risk=str(obj.get("Risk", obj.get("risk", ""))),
         outcome=str(obj.get("Outcome", obj.get("outcome", "denied"))),
         execution_id=str(obj.get("ExecutionID", obj.get("execution_id", ""))),
+        operation_version=str(obj.get("OperationVersion", obj.get("operation_version", ""))),
         reliability_warning=str(obj.get("ReliabilityWarning", obj.get("reliability_warning", ""))),
     )
 
@@ -77,7 +79,7 @@ class Client:
     base_url: str
     token: str = ""
     timeout: float = 30.0
-    user_agent: str = "loom-python-sdk/0.1.3"
+    user_agent: str = "loom-python-sdk/0.1.4"
 
     def call(
         self,

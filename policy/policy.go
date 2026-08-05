@@ -44,6 +44,8 @@ type Rule struct {
 	Boundary core.BoundaryID
 	// Operation exact name or "*".
 	Operation string
+	// OperationVersion exact version; empty applies to every registered version.
+	OperationVersion string
 	// Permissions: identity must hold ALL of these (AND). Empty = rely on Operation match only.
 	Permissions []string
 	// EffectAllow lists effects this rule covers; empty = no effect restriction.
@@ -178,6 +180,9 @@ func (e *MemoryEngine) CheckOperationPermission(ctx context.Context, id core.Ide
 		if rule.Operation != "*" && rule.Operation != op.Name {
 			continue
 		}
+		if rule.OperationVersion != "" && core.NormalizeOperationVersion(rule.OperationVersion) != core.NormalizeOperationVersion(op.Version) {
+			continue
+		}
 		// Permission AND on rule
 		if len(rule.Permissions) > 0 {
 			ok := true
@@ -265,6 +270,9 @@ func (e *MemoryEngine) EvaluateContextual(ctx context.Context, id core.Identity,
 			continue
 		}
 		if rule.Operation != "*" && rule.Operation != op.Name {
+			continue
+		}
+		if rule.OperationVersion != "" && core.NormalizeOperationVersion(rule.OperationVersion) != core.NormalizeOperationVersion(op.Version) {
 			continue
 		}
 		if len(rule.Permissions) > 0 {

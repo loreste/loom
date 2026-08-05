@@ -1,8 +1,11 @@
 [package]
 name = "loom-sdk"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
 description = "Loom Universal Runtime Rust SDK (HTTP client)"
+repository = "https://github.com/loreste/loom"
+homepage = "https://github.com/loreste/loom"
+documentation = "https://docs.rs/loom-sdk"
 license = "Apache-2.0"
 
 [dependencies]

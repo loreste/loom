@@ -10,7 +10,7 @@ if [ -z "$repository" ]; then
   exit 1
 fi
 if [ -z "$version" ]; then
- echo "set LOOM_VERSION to an exact release tag (for example, v0.1.3)" >&2
+	  echo "set LOOM_VERSION to an exact release tag (for example, v0.1.4)" >&2
   exit 1
 fi
 

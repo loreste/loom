@@ -26,16 +26,17 @@ type ExecuteRequest struct {
 	Operation string                 `protobuf:"bytes,1,opt,name=operation,proto3" json:"operation,omitempty"`
 	Boundary  string                 `protobuf:"bytes,2,opt,name=boundary,proto3" json:"boundary,omitempty"`
 	// input_json is a JSON object (map). Empty or "{}" means empty input.
-	InputJson      string            `protobuf:"bytes,3,opt,name=input_json,json=inputJson,proto3" json:"input_json,omitempty"`
-	ResourceType   string            `protobuf:"bytes,4,opt,name=resource_type,json=resourceType,proto3" json:"resource_type,omitempty"`
-	ResourceId     string            `protobuf:"bytes,5,opt,name=resource_id,json=resourceId,proto3" json:"resource_id,omitempty"`
-	Fields         []string          `protobuf:"bytes,6,rep,name=fields,proto3" json:"fields,omitempty"`
-	IdempotencyKey string            `protobuf:"bytes,7,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
-	ApprovalToken  string            `protobuf:"bytes,8,opt,name=approval_token,json=approvalToken,proto3" json:"approval_token,omitempty"`
-	Metadata       map[string]string `protobuf:"bytes,9,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	TraceId        string            `protobuf:"bytes,10,opt,name=trace_id,json=traceId,proto3" json:"trace_id,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	InputJson        string            `protobuf:"bytes,3,opt,name=input_json,json=inputJson,proto3" json:"input_json,omitempty"`
+	ResourceType     string            `protobuf:"bytes,4,opt,name=resource_type,json=resourceType,proto3" json:"resource_type,omitempty"`
+	ResourceId       string            `protobuf:"bytes,5,opt,name=resource_id,json=resourceId,proto3" json:"resource_id,omitempty"`
+	Fields           []string          `protobuf:"bytes,6,rep,name=fields,proto3" json:"fields,omitempty"`
+	IdempotencyKey   string            `protobuf:"bytes,7,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	ApprovalToken    string            `protobuf:"bytes,8,opt,name=approval_token,json=approvalToken,proto3" json:"approval_token,omitempty"`
+	Metadata         map[string]string `protobuf:"bytes,9,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	TraceId          string            `protobuf:"bytes,10,opt,name=trace_id,json=traceId,proto3" json:"trace_id,omitempty"`
+	OperationVersion string            `protobuf:"bytes,11,opt,name=operation_version,json=operationVersion,proto3" json:"operation_version,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *ExecuteRequest) Reset() {
@@ -138,23 +139,34 @@ func (x *ExecuteRequest) GetTraceId() string {
 	return ""
 }
 
+func (x *ExecuteRequest) GetOperationVersion() string {
+	if x != nil {
+		return x.OperationVersion
+	}
+	return ""
+}
+
 type ExecuteResponse struct {
 	state    protoimpl.MessageState `protogen:"open.v1"`
 	Allowed  bool                   `protobuf:"varint,1,opt,name=allowed,proto3" json:"allowed,omitempty"`
 	Decision string                 `protobuf:"bytes,2,opt,name=decision,proto3" json:"decision,omitempty"`
 	// output_json is a JSON object; empty when denied.
-	OutputJson       string `protobuf:"bytes,3,opt,name=output_json,json=outputJson,proto3" json:"output_json,omitempty"`
-	DenialReason     string `protobuf:"bytes,4,opt,name=denial_reason,json=denialReason,proto3" json:"denial_reason,omitempty"`
-	DenialMessage    string `protobuf:"bytes,5,opt,name=denial_message,json=denialMessage,proto3" json:"denial_message,omitempty"`
-	DenialStep       string `protobuf:"bytes,6,opt,name=denial_step,json=denialStep,proto3" json:"denial_step,omitempty"`
-	DenialRetryable  bool   `protobuf:"varint,7,opt,name=denial_retryable,json=denialRetryable,proto3" json:"denial_retryable,omitempty"`
-	DenialHint       string `protobuf:"bytes,8,opt,name=denial_hint,json=denialHint,proto3" json:"denial_hint,omitempty"`
-	TraceId          string `protobuf:"bytes,9,opt,name=trace_id,json=traceId,proto3" json:"trace_id,omitempty"`
-	AuditId          string `protobuf:"bytes,10,opt,name=audit_id,json=auditId,proto3" json:"audit_id,omitempty"`
-	IdempotentReplay bool   `protobuf:"varint,11,opt,name=idempotent_replay,json=idempotentReplay,proto3" json:"idempotent_replay,omitempty"`
-	Risk             string `protobuf:"bytes,12,opt,name=risk,proto3" json:"risk,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	OutputJson         string `protobuf:"bytes,3,opt,name=output_json,json=outputJson,proto3" json:"output_json,omitempty"`
+	DenialReason       string `protobuf:"bytes,4,opt,name=denial_reason,json=denialReason,proto3" json:"denial_reason,omitempty"`
+	DenialMessage      string `protobuf:"bytes,5,opt,name=denial_message,json=denialMessage,proto3" json:"denial_message,omitempty"`
+	DenialStep         string `protobuf:"bytes,6,opt,name=denial_step,json=denialStep,proto3" json:"denial_step,omitempty"`
+	DenialRetryable    bool   `protobuf:"varint,7,opt,name=denial_retryable,json=denialRetryable,proto3" json:"denial_retryable,omitempty"`
+	DenialHint         string `protobuf:"bytes,8,opt,name=denial_hint,json=denialHint,proto3" json:"denial_hint,omitempty"`
+	TraceId            string `protobuf:"bytes,9,opt,name=trace_id,json=traceId,proto3" json:"trace_id,omitempty"`
+	AuditId            string `protobuf:"bytes,10,opt,name=audit_id,json=auditId,proto3" json:"audit_id,omitempty"`
+	IdempotentReplay   bool   `protobuf:"varint,11,opt,name=idempotent_replay,json=idempotentReplay,proto3" json:"idempotent_replay,omitempty"`
+	Risk               string `protobuf:"bytes,12,opt,name=risk,proto3" json:"risk,omitempty"`
+	OperationVersion   string `protobuf:"bytes,13,opt,name=operation_version,json=operationVersion,proto3" json:"operation_version,omitempty"`
+	Outcome            string `protobuf:"bytes,14,opt,name=outcome,proto3" json:"outcome,omitempty"`
+	ExecutionId        string `protobuf:"bytes,15,opt,name=execution_id,json=executionId,proto3" json:"execution_id,omitempty"`
+	ReliabilityWarning string `protobuf:"bytes,16,opt,name=reliability_warning,json=reliabilityWarning,proto3" json:"reliability_warning,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *ExecuteResponse) Reset() {
@@ -271,11 +283,39 @@ func (x *ExecuteResponse) GetRisk() string {
 	return ""
 }
 
+func (x *ExecuteResponse) GetOperationVersion() string {
+	if x != nil {
+		return x.OperationVersion
+	}
+	return ""
+}
+
+func (x *ExecuteResponse) GetOutcome() string {
+	if x != nil {
+		return x.Outcome
+	}
+	return ""
+}
+
+func (x *ExecuteResponse) GetExecutionId() string {
+	if x != nil {
+		return x.ExecutionId
+	}
+	return ""
+}
+
+func (x *ExecuteResponse) GetReliabilityWarning() string {
+	if x != nil {
+		return x.ReliabilityWarning
+	}
+	return ""
+}
+
 var File_loom_v1_loom_proto protoreflect.FileDescriptor
 
 const file_loom_v1_loom_proto_rawDesc = "" +
 	"\n" +
-	"\x12loom/v1/loom.proto\x12\aloom.v1\"\xb2\x03\n" +
+	"\x12loom/v1/loom.proto\x12\aloom.v1\"\xdf\x03\n" +
 	"\x0eExecuteRequest\x12\x1c\n" +
 	"\toperation\x18\x01 \x01(\tR\toperation\x12\x1a\n" +
 	"\bboundary\x18\x02 \x01(\tR\bboundary\x12\x1d\n" +
@@ -289,10 +329,11 @@ const file_loom_v1_loom_proto_rawDesc = "" +
 	"\x0eapproval_token\x18\b \x01(\tR\rapprovalToken\x12A\n" +
 	"\bmetadata\x18\t \x03(\v2%.loom.v1.ExecuteRequest.MetadataEntryR\bmetadata\x12\x19\n" +
 	"\btrace_id\x18\n" +
-	" \x01(\tR\atraceId\x1a;\n" +
+	" \x01(\tR\atraceId\x12+\n" +
+	"\x11operation_version\x18\v \x01(\tR\x10operationVersion\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x98\x03\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xb3\x04\n" +
 	"\x0fExecuteResponse\x12\x18\n" +
 	"\aallowed\x18\x01 \x01(\bR\aallowed\x12\x1a\n" +
 	"\bdecision\x18\x02 \x01(\tR\bdecision\x12\x1f\n" +
@@ -309,7 +350,11 @@ const file_loom_v1_loom_proto_rawDesc = "" +
 	"\baudit_id\x18\n" +
 	" \x01(\tR\aauditId\x12+\n" +
 	"\x11idempotent_replay\x18\v \x01(\bR\x10idempotentReplay\x12\x12\n" +
-	"\x04risk\x18\f \x01(\tR\x04risk2G\n" +
+	"\x04risk\x18\f \x01(\tR\x04risk\x12+\n" +
+	"\x11operation_version\x18\r \x01(\tR\x10operationVersion\x12\x18\n" +
+	"\aoutcome\x18\x0e \x01(\tR\aoutcome\x12!\n" +
+	"\fexecution_id\x18\x0f \x01(\tR\vexecutionId\x12/\n" +
+	"\x13reliability_warning\x18\x10 \x01(\tR\x12reliabilityWarning2G\n" +
 	"\aRuntime\x12<\n" +
 	"\aExecute\x12\x17.loom.v1.ExecuteRequest\x1a\x18.loom.v1.ExecuteResponseB:Z8github.com/loreste/loom/adapters/grpc/gen/loom/v1;loomv1b\x06proto3"
 

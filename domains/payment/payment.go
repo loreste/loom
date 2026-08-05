@@ -36,6 +36,7 @@ func Register(reg *core.Registry) error {
 		Effects:         []core.Effect{core.EffectMoney, core.EffectWrite},
 		Approval:        core.ApprovalPolicy{MinRisk: core.RiskHigh},
 		Idempotency:     core.IdempotencyPolicy{Required: true, TTLSeconds: 86400},
+		Quota:           core.QuotaPolicy{Enabled: true},
 		SensitiveFields: []string{"pan", "cvv", "raw_processor_payload"},
 		Limits:          map[string]int64{"amount": 10000},
 	}, handleCapture); err != nil {
@@ -63,6 +64,7 @@ func Register(reg *core.Registry) error {
 		Effects:         []core.Effect{core.EffectMoney, core.EffectWrite},
 		Approval:        core.ApprovalPolicy{Required: true},
 		Idempotency:     core.IdempotencyPolicy{Required: true, TTLSeconds: 86400},
+		Quota:           core.QuotaPolicy{Enabled: true},
 		SensitiveFields: []string{"pan", "cvv"},
 	}, handleRefund)
 }

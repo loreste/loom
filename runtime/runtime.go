@@ -20,6 +20,7 @@ import (
 	"github.com/loreste/loom/audit"
 	"github.com/loreste/loom/boundary"
 	"github.com/loreste/loom/core"
+	"github.com/loreste/loom/execution"
 	"github.com/loreste/loom/guardrails"
 	"github.com/loreste/loom/idempotency"
 	"github.com/loreste/loom/identity"
@@ -61,12 +62,17 @@ type Dependencies struct {
 	Quotas              quotas.Limiter
 	Idempotency         idempotency.Store
 	IdempotencyRecovery idempotency.RecoveryQueue
+	ExecutionStatus     execution.Store
 	Audit               *audit.Logger
 	Observer            Observer
 
 	// AllowAnonymous is false by default. If true, empty credentials get a synthetic
 	// unauthenticated identity that still must pass policy (almost always deny).
 	AllowAnonymous bool
+	// DeferDurableValidation allows a production app to start before operation
+	// registration. Register-time validation then checks only the capabilities
+	// required by each operation.
+	DeferDurableValidation bool
 	// Tenant runs after authentication/delegation and before boundary
 	// authorization. Its resolved boundary is used by all later gates.
 	Tenant TenantResolver
@@ -97,7 +103,7 @@ func New(deps Dependencies) (*Runtime, error) {
 	if deps.Resources == nil {
 		return nil, fmt.Errorf("%w: resource checker required", core.ErrInvalidArgument)
 	}
-	if deps.Mode == ModeProduction {
+	if deps.Mode == ModeProduction && !deps.DeferDurableValidation {
 		if deps.Approval == nil || !durable(deps.Approval) {
 			return nil, fmt.Errorf("%w: production requires durable approval state", core.ErrInvalidArgument)
 		}
@@ -133,6 +139,9 @@ func New(deps Dependencies) (*Runtime, error) {
 	if deps.Idempotency == nil {
 		deps.Idempotency = idempotency.NewMemoryStore()
 	}
+	if deps.ExecutionStatus == nil {
+		deps.ExecutionStatus = execution.NewMemoryStore()
+	}
 	if deps.Audit == nil {
 		deps.Audit = audit.NewLogger(&audit.MemorySink{})
 	}
@@ -140,6 +149,151 @@ func New(deps Dependencies) (*Runtime, error) {
 		deps.Clock = time.Now
 	}
 	return &Runtime{deps: deps}, nil
+}
+
+// ValidateOperation checks production capabilities required by one operation.
+// It is safe to call during registration and again at execution time.
+func (rt *Runtime) ValidateOperation(op *core.Operation) error {
+	if rt == nil || op == nil {
+		return fmt.Errorf("%w: operation is required", core.ErrInvalidArgument)
+	}
+	if rt.deps.Mode != ModeProduction {
+		return nil
+	}
+	sideEffect := op.HasEffect(core.EffectWrite) || op.HasEffect(core.EffectDelete) ||
+		op.HasEffect(core.EffectExec) || op.HasEffect(core.EffectMoney) || op.HasEffect(core.EffectAdmin)
+	if !sideEffect {
+		return nil
+	}
+	if rt.deps.ExecutionStatus == nil || !durable(rt.deps.ExecutionStatus) {
+		return fmt.Errorf("%w: %s requires durable execution status", core.ErrInvalidArgument, op.Name)
+	}
+	if rt.deps.Audit == nil || rt.deps.Audit.Sink == nil || !durable(rt.deps.Audit.Sink) {
+		return fmt.Errorf("%w: %s requires durable audit", core.ErrInvalidArgument, op.Name)
+	}
+	if op.Idempotency.Required && !durable(rt.deps.Idempotency) {
+		return fmt.Errorf("%w: %s requires durable idempotency", core.ErrInvalidArgument, op.Name)
+	}
+	approvalRequired := op.Approval.Required || op.Approval.MinRisk > core.RiskLow || len(op.Approval.Effects) > 0
+	if approvalRequired && !durable(rt.deps.Approval) {
+		return fmt.Errorf("%w: %s requires durable approval", core.ErrInvalidArgument, op.Name)
+	}
+	if op.Quota.Enabled && !durable(rt.deps.Quotas) {
+		return fmt.Errorf("%w: %s requires durable quota state", core.ErrInvalidArgument, op.Name)
+	}
+	return nil
+}
+
+// ExecutionStatus returns the caller-safe status record for an execution ID.
+// Authorization for remote callers belongs to the adapter; in-process callers
+// should only expose this method to trusted operational code.
+func (rt *Runtime) ExecutionStatus(ctx context.Context, executionID string) (execution.Record, error) {
+	if rt == nil || rt.deps.ExecutionStatus == nil {
+		return execution.Record{}, fmt.Errorf("%w: execution status store is not configured", core.ErrInvalidArgument)
+	}
+	record, ok, err := rt.deps.ExecutionStatus.Get(ctx, executionID)
+	if err != nil {
+		return execution.Record{}, err
+	}
+	if !ok {
+		return execution.Record{}, fmt.Errorf("%w: execution %q", core.ErrNotFound, executionID)
+	}
+	return record, nil
+}
+
+// ReconcileExecution confirms whether an executed_unconfirmed handler attempt
+// completed. It never runs the handler again.
+func (rt *Runtime) ReconcileExecution(ctx context.Context, executionID string, outcome core.Outcome, note string) (execution.Record, error) {
+	if rt == nil || rt.deps.ExecutionStatus == nil {
+		return execution.Record{}, fmt.Errorf("%w: execution status store is not configured", core.ErrInvalidArgument)
+	}
+	return rt.deps.ExecutionStatus.Reconcile(ctx, executionID, outcome, note)
+}
+
+// RetryExecutionRecording requeues only the durable idempotency/audit record;
+// it never retries the business handler or its side effect.
+func (rt *Runtime) RetryExecutionRecording(ctx context.Context, executionID string) error {
+	record, err := rt.ExecutionStatus(ctx, executionID)
+	if err != nil {
+		return err
+	}
+	if record.IdempotencyKey == "" || record.Fingerprint == "" {
+		return fmt.Errorf("%w: execution has no pending idempotency recording", core.ErrInvalidArgument)
+	}
+	if rt.deps.IdempotencyRecovery == nil {
+		return fmt.Errorf("%w: idempotency recovery queue is not configured", core.ErrInvalidArgument)
+	}
+	if err := rt.deps.IdempotencyRecovery.Enqueue(ctx, idempotency.RecoveryRecord{
+		ExecutionID: executionID, Key: record.IdempotencyKey,
+		Fingerprint: record.Fingerprint, Response: record.Response,
+		CreatedAt: rt.deps.Clock(),
+	}); err != nil {
+		return err
+	}
+	_, err = rt.deps.ExecutionStatus.MarkRecoveryQueued(ctx, executionID)
+	return err
+}
+
+// ExecutionStatusFor authenticates a caller and permits the execution owner
+// or an explicit execution.status capability to read a status record.
+func (rt *Runtime) ExecutionStatusFor(ctx context.Context, credentials core.Credentials, executionID string) (execution.Record, error) {
+	identity, record, err := rt.authorizeExecution(ctx, credentials, executionID)
+	if err != nil {
+		return execution.Record{}, err
+	}
+	if identity.ID != core.PrincipalID(record.Principal) && !hasCapability(identity, "execution.status") {
+		return execution.Record{}, fmt.Errorf("%w: execution status access denied", core.ErrUnauthorized)
+	}
+	return record, nil
+}
+
+// ReconcileExecutionFor authenticates a caller before confirming an outcome.
+func (rt *Runtime) ReconcileExecutionFor(ctx context.Context, credentials core.Credentials, executionID string, outcome core.Outcome, note string) (execution.Record, error) {
+	identity, record, err := rt.authorizeExecution(ctx, credentials, executionID)
+	if err != nil {
+		return execution.Record{}, err
+	}
+	if identity.ID != core.PrincipalID(record.Principal) && !hasCapability(identity, "execution.reconcile") {
+		return execution.Record{}, fmt.Errorf("%w: execution reconciliation access denied", core.ErrUnauthorized)
+	}
+	return rt.ReconcileExecution(ctx, executionID, outcome, note)
+}
+
+// RetryExecutionRecordingFor authenticates a caller before requeueing durable
+// recording work. The handler is never rerun.
+func (rt *Runtime) RetryExecutionRecordingFor(ctx context.Context, credentials core.Credentials, executionID string) error {
+	identity, record, err := rt.authorizeExecution(ctx, credentials, executionID)
+	if err != nil {
+		return err
+	}
+	if identity.ID != core.PrincipalID(record.Principal) && !hasCapability(identity, "execution.reconcile") {
+		return fmt.Errorf("%w: execution retry access denied", core.ErrUnauthorized)
+	}
+	return rt.RetryExecutionRecording(ctx, executionID)
+}
+
+func (rt *Runtime) authorizeExecution(ctx context.Context, credentials core.Credentials, executionID string) (core.Identity, execution.Record, error) {
+	if rt == nil || rt.deps.Verifier == nil {
+		return core.Identity{}, execution.Record{}, fmt.Errorf("%w: identity verifier is not configured", core.ErrInvalidArgument)
+	}
+	identity, err := rt.deps.Verifier.Authenticate(ctx, credentials)
+	if err != nil {
+		return core.Identity{}, execution.Record{}, fmt.Errorf("%w: credentials", core.ErrUnauthorized)
+	}
+	record, err := rt.ExecutionStatus(ctx, executionID)
+	if err != nil {
+		return core.Identity{}, execution.Record{}, err
+	}
+	return identity, record, nil
+}
+
+func hasCapability(identity core.Identity, capability string) bool {
+	for _, candidate := range identity.Capabilities {
+		if candidate == capability {
+			return true
+		}
+	}
+	return identity.Type == "system"
 }
 
 func durable(value any) bool {
@@ -150,6 +304,10 @@ func durable(value any) bool {
 // Execute runs the full permission pipeline. Never panics out; recovers to deny.
 func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Response) {
 	executionID := core.NewTraceID()
+	selectedVersion := core.NormalizeOperationVersion(req.OperationVersion)
+	req.ExecutionID = executionID
+	var executionRecord execution.Record
+	var executionRecordStarted bool
 	defer func() {
 		if resp.ExecutionID == "" {
 			resp.ExecutionID = executionID
@@ -159,6 +317,18 @@ func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Res
 				resp.Outcome = core.OutcomeAllowed
 			} else {
 				resp.Outcome = core.OutcomeDenied
+			}
+		}
+		if resp.OperationVersion == "" {
+			resp.OperationVersion = selectedVersion
+		}
+		if executionRecordStarted && rt != nil && rt.deps.ExecutionStatus != nil {
+			executionRecord.Response = resp
+			executionRecord.Outcome = resp.Outcome
+			executionRecord.State = execution.StateFor(resp)
+			executionRecord.UpdatedAt = rt.deps.Clock()
+			if err := rt.deps.ExecutionStatus.Put(context.Background(), executionRecord); err != nil {
+				log.Printf("loom: execution status update failed for %s: %v", executionID, err)
 			}
 		}
 	}()
@@ -262,6 +432,7 @@ func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Res
 	if err != nil {
 		return rt.deny(ctx, req, id, nil, core.RiskLow, "operation", core.ReasonOperationUnknown, err.Error(), start, "")
 	}
+	selectedVersion = op.Version
 
 	// 4. Operation permission
 	dec := rt.deps.Policy.CheckOperationPermission(ctx, id, op)
@@ -301,6 +472,9 @@ func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Res
 	}
 
 	// 8. Guardrails
+	if err := rt.ValidateOperation(op); err != nil {
+		return rt.deny(ctx, req, id, op, core.RiskLow, "production", core.ReasonInternal, err.Error(), start, "")
+	}
 	if err := rt.deps.Guardrails.ValidateOperation(op); err != nil {
 		return rt.deny(ctx, req, id, op, core.RiskLow, "guardrails", core.ReasonGuardrail, err.Error(), start, "")
 	}
@@ -366,10 +540,13 @@ func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Res
 
 	// 12. Quotas (replays do not consume)
 	quotaCharged := false
-	if err := rt.deps.Quotas.Allow(ctx, id, req.Boundary, op.Name, 1); err != nil {
-		return rt.deny(ctx, req, id, op, riskLevel, "quotas", core.ReasonQuotaExceeded, err.Error(), start, "")
+	quotaEnabled := rt.deps.Mode != ModeProduction || op.Quota.Enabled
+	if quotaEnabled {
+		if err := rt.deps.Quotas.Allow(ctx, id, req.Boundary, op.Name, 1); err != nil {
+			return rt.deny(ctx, req, id, op, riskLevel, "quotas", core.ReasonQuotaExceeded, err.Error(), start, "")
+		}
+		quotaCharged = true
 	}
-	quotaCharged = true
 
 	// Reserve idempotency key after approval check so failed approval does not pin the key.
 	if req.IdempotencyKey != "" {
@@ -401,7 +578,7 @@ func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Res
 	}
 
 	// 14. Execute
-	handler, err := rt.deps.Registry.Handler(op.Name)
+	handler, err := rt.deps.Registry.HandlerVersion(op.Name, op.Version)
 	if err != nil {
 		return rt.deny(ctx, req, id, op, riskLevel, "execute", core.ReasonHandlerMissing, err.Error(), start, "")
 	}
@@ -423,6 +600,16 @@ func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Res
 		}
 		return rt.deny(ctx, req, id, op, riskLevel, "execute", core.ReasonContextCanceled, ctxErrMessage(err), start, "")
 	}
+	executionRecord = execution.Record{
+		ExecutionID: executionID, Operation: op.Name, OperationVersion: op.Version,
+		Principal: string(id.ID), Boundary: string(req.Boundary), State: execution.StatePending,
+		Response:       core.Response{ExecutionID: executionID, OperationVersion: op.Version},
+		IdempotencyKey: idemKey, Fingerprint: idemFP, StartedAt: start,
+	}
+	if err := rt.deps.ExecutionStatus.Put(ctx, executionRecord); err != nil {
+		return rt.deny(ctx, req, id, op, riskLevel, "execution_status", core.ReasonInternal, err.Error(), start, "")
+	}
+	executionRecordStarted = true
 	result, err := handler(ec)
 	if err != nil {
 		// Execution failed: refund the quota charged above so failing handlers
@@ -462,25 +649,27 @@ func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Res
 			idemBegin = false
 		}
 		return core.Response{
-			Allowed:     false,
-			Outcome:     core.OutcomeExecutedUnconfirmed,
-			ExecutionID: executionID,
-			Decision:    core.DecisionDeny,
-			Denial:      core.SafeDenial("audit", core.ReasonExecutedUnconfirmed),
-			TraceID:     req.TraceID,
-			Risk:        riskLevel,
+			Allowed:          false,
+			Outcome:          core.OutcomeExecutedUnconfirmed,
+			ExecutionID:      executionID,
+			OperationVersion: op.Version,
+			Decision:         core.DecisionDeny,
+			Denial:           core.SafeDenial("audit", core.ReasonExecutedUnconfirmed),
+			TraceID:          req.TraceID,
+			Risk:             riskLevel,
 		}
 	}
 
 	resp = core.Response{
-		Allowed:     true,
-		Outcome:     core.OutcomeAllowed,
-		ExecutionID: executionID,
-		Decision:    core.DecisionAllow,
-		Output:      filtered,
-		TraceID:     req.TraceID,
-		AuditID:     auditID,
-		Risk:        riskLevel,
+		Allowed:          true,
+		Outcome:          core.OutcomeAllowed,
+		ExecutionID:      executionID,
+		OperationVersion: op.Version,
+		Decision:         core.DecisionAllow,
+		Output:           filtered,
+		TraceID:          req.TraceID,
+		AuditID:          auditID,
+		Risk:             riskLevel,
 	}
 
 	// Complete idempotency. On failure: log loudly, do NOT Abort (would enable
@@ -572,6 +761,9 @@ func (rt *Runtime) audit(
 	priorAudit string,
 	executionID string,
 ) (string, error) {
+	if executionID == "" {
+		executionID = req.ExecutionID
+	}
 	opName := req.Operation
 	if op != nil {
 		opName = op.Name

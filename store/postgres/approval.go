@@ -32,6 +32,12 @@ func hashTok(token string) string {
 
 // Issue implements approval.Issuer. Tokens stored hashed only.
 func (s *ApprovalStore) Issue(token string, principal core.PrincipalID, op string, boundary core.BoundaryID, maxRisk core.RiskLevel, ttl time.Duration) error {
+	return s.IssueVersioned(token, principal, op, core.DefaultOperationVersion, boundary, maxRisk, ttl)
+}
+
+// IssueVersioned implements approval.VersionedIssuer. Tokens are bound to an
+// exact operation version and stored hashed only.
+func (s *ApprovalStore) IssueVersioned(token string, principal core.PrincipalID, op string, version string, boundary core.BoundaryID, maxRisk core.RiskLevel, ttl time.Duration) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("%w: nil store", core.ErrInvalidArgument)
 	}
@@ -45,10 +51,10 @@ func (s *ApprovalStore) Issue(token string, principal core.PrincipalID, op strin
 	exp := time.Now().UTC().Add(ttl)
 	// Never resurrect consumed tokens or overwrite an existing issuance.
 	res, err := s.db.Exec(`
-		INSERT INTO loom_approvals (token_hash, principal, operation, boundary, max_risk, expires_at, consumed, single_use)
-		VALUES ($1, $2, $3, $4, $5, $6, FALSE, TRUE)
+		INSERT INTO loom_approvals (token_hash, principal, operation, operation_version, boundary, max_risk, expires_at, consumed, single_use)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, FALSE, TRUE)
 		ON CONFLICT (token_hash) DO NOTHING
-	`, h, string(principal), op, string(boundary), int(maxRisk), exp)
+	`, h, string(principal), op, core.NormalizeOperationVersion(version), string(boundary), int(maxRisk), exp)
 	if err != nil {
 		return err
 	}
@@ -78,17 +84,18 @@ func (s *ApprovalStore) Evaluate(ctx context.Context, id core.Identity, op *core
 
 	h := hashTok(token)
 	var (
-		principal   string
-		operation   string
-		recBoundary string
-		maxRisk     int
-		expires     time.Time
-		consumed    bool
+		principal        string
+		operation        string
+		operationVersion string
+		recBoundary      string
+		maxRisk          int
+		expires          time.Time
+		consumed         bool
 	)
 	err := s.db.QueryRowContext(ctx, `
-		SELECT principal, operation, boundary, max_risk, expires_at, consumed
+		SELECT principal, operation, operation_version, boundary, max_risk, expires_at, consumed
 		FROM loom_approvals WHERE token_hash = $1
-	`, h).Scan(&principal, &operation, &recBoundary, &maxRisk, &expires, &consumed)
+`, h).Scan(&principal, &operation, &operationVersion, &recBoundary, &maxRisk, &expires, &consumed)
 	if err == sql.ErrNoRows {
 		return approval.Decision{Required: true, Approved: false, Message: "unknown approval token"}
 	}
@@ -107,6 +114,9 @@ func (s *ApprovalStore) Evaluate(ctx context.Context, id core.Identity, op *core
 	}
 	if operation != "*" && operation != op.Name {
 		return approval.Decision{Required: true, Approved: false, Message: "approval operation mismatch"}
+	}
+	if core.NormalizeOperationVersion(operationVersion) != core.NormalizeOperationVersion(op.Version) {
+		return approval.Decision{Required: true, Approved: false, Message: "approval operation version mismatch"}
 	}
 	if core.BoundaryID(recBoundary) != boundary {
 		return approval.Decision{Required: true, Approved: false, Message: "approval boundary mismatch"}
@@ -136,16 +146,17 @@ func (s *ApprovalStore) Consume(ctx context.Context, id core.Identity, op *core.
 	defer func() { _ = tx.Rollback() }()
 
 	var (
-		principal   string
-		operation   string
-		recBoundary string
-		expires     time.Time
-		singleUse   bool
+		principal        string
+		operation        string
+		operationVersion string
+		recBoundary      string
+		expires          time.Time
+		singleUse        bool
 	)
 	err = tx.QueryRowContext(ctx, `
-		SELECT principal, operation, boundary, expires_at, single_use
+		SELECT principal, operation, operation_version, boundary, expires_at, single_use
 		FROM loom_approvals WHERE token_hash = $1 AND consumed = FALSE FOR UPDATE
-	`, h).Scan(&principal, &operation, &recBoundary, &expires, &singleUse)
+`, h).Scan(&principal, &operation, &operationVersion, &recBoundary, &expires, &singleUse)
 	if err == sql.ErrNoRows {
 		return fmt.Errorf("approval: unknown or already consumed token")
 	}
@@ -160,6 +171,9 @@ func (s *ApprovalStore) Consume(ctx context.Context, id core.Identity, op *core.
 	}
 	if operation != "*" && operation != op.Name {
 		return fmt.Errorf("approval: operation mismatch")
+	}
+	if core.NormalizeOperationVersion(operationVersion) != core.NormalizeOperationVersion(op.Version) {
+		return fmt.Errorf("approval: operation version mismatch")
 	}
 	if core.BoundaryID(recBoundary) != boundary {
 		return fmt.Errorf("approval: boundary mismatch")

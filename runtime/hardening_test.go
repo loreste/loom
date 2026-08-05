@@ -35,6 +35,25 @@ func TestProductionModeRejectsImplicitStateStores(t *testing.T) {
 	}
 }
 
+func TestExecutionStatusBindsSelectedVersion(t *testing.T) {
+	s := setupGranted(t)
+	token := "status-approval"
+	if err := s.Approval.Issue(token, "user:alice", "payment.capture", "dev", core.RiskCritical, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	resp := s.Runtime.Execute(context.Background(), paymentReq(token, "status-idem"))
+	if !resp.Allowed {
+		t.Fatalf("payment should allow: %+v", resp.Denial)
+	}
+	record, err := s.Runtime.ExecutionStatus(context.Background(), resp.ExecutionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.OperationVersion != core.DefaultOperationVersion || record.State != "allowed" || record.Response.OperationVersion != core.DefaultOperationVersion {
+		t.Fatalf("unexpected execution record: %+v", record)
+	}
+}
+
 // stackWith rebuilds a Runtime over an existing TestStack with selected
 // dependencies swapped out (fault injection).
 func stackWith(t *testing.T, s *runtime.TestStack, mutate func(d *runtime.Dependencies)) *runtime.Runtime {

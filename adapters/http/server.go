@@ -133,6 +133,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /readyz", s.handleReady)
 	s.mux.HandleFunc("GET /.well-known/loom.json", s.handleManifest)
 	s.mux.HandleFunc("POST /v1/execute", s.handleExecute)
+	s.mux.HandleFunc("GET /v1/executions/{execution_id}", s.handleExecutionStatus)
+	s.mux.HandleFunc("POST /v1/executions/{execution_id}/reconcile", s.handleExecutionReconcile)
+	s.mux.HandleFunc("POST /v1/executions/{execution_id}/retry_recording", s.handleExecutionRetryRecording)
 	// Convenience aliases — still full Runtime.Execute (no privilege shortcut).
 	s.mux.HandleFunc("POST /v1/approvals", s.handleApprovalIssue)
 	s.mux.HandleFunc("POST /v1/catalog", s.handleCatalogList)
@@ -152,6 +155,63 @@ func (s *Server) routes() {
 		s.mux.HandleFunc("GET /metrics", s.handleMetrics)
 	}
 	s.mux.HandleFunc("/", s.handleNotFound)
+}
+
+type executionReconcileBody struct {
+	Outcome core.Outcome `json:"outcome"`
+	Note    string       `json:"note,omitempty"`
+}
+
+func (s *Server) handleExecutionStatus(w http.ResponseWriter, r *http.Request) {
+	credentials, err := s.extractCredentials(r)
+	if err != nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "credentials"})
+		return
+	}
+	record, err := s.RT.ExecutionStatusFor(r.Context(), credentials, r.PathValue("execution_id"))
+	if err != nil {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "execution status unavailable"})
+		return
+	}
+	writeJSON(w, http.StatusOK, record)
+}
+
+func (s *Server) handleExecutionReconcile(w http.ResponseWriter, r *http.Request) {
+	credentials, err := s.extractCredentials(r)
+	if err != nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "credentials"})
+		return
+	}
+	var body executionReconcileBody
+	dec := json.NewDecoder(io.LimitReader(r.Body, s.Config.MaxBodyBytes+1))
+	if err := dec.Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid reconciliation body"})
+		return
+	}
+	record, err := s.RT.ReconcileExecutionFor(r.Context(), credentials, r.PathValue("execution_id"), body.Outcome, body.Note)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "reconciliation rejected"})
+		return
+	}
+	writeJSON(w, http.StatusOK, record)
+}
+
+func (s *Server) handleExecutionRetryRecording(w http.ResponseWriter, r *http.Request) {
+	credentials, err := s.extractCredentials(r)
+	if err != nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "credentials"})
+		return
+	}
+	if err := s.RT.RetryExecutionRecordingFor(r.Context(), credentials, r.PathValue("execution_id")); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "recording retry rejected"})
+		return
+	}
+	record, err := s.RT.ExecutionStatusFor(r.Context(), credentials, r.PathValue("execution_id"))
+	if err != nil {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "execution status unavailable"})
+		return
+	}
+	writeJSON(w, http.StatusOK, record)
 }
 
 // handleApprovalIssue maps to operation approval.issue through the runtime.

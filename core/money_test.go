@@ -24,6 +24,28 @@ func TestParseMoneyUsesExactDecimalArithmetic(t *testing.T) {
 	}
 }
 
+func TestMoneyDeltaKeepsSignedAccountingSeparate(t *testing.T) {
+	delta := core.MoneyDelta{Units: -2, Nanos: -500_000_000, Currency: "USD"}
+	if !delta.Valid() {
+		t.Fatal("signed delta should be valid")
+	}
+	if (core.Money{Units: -1, Currency: "USD"}).Valid() {
+		t.Fatal("payment Money must remain non-negative")
+	}
+	if (core.MoneyDelta{Units: -2, Nanos: 500_000_000, Currency: "USD"}).Valid() {
+		t.Fatal("mixed-sign delta must be rejected")
+	}
+}
+
+func TestCurrencyAllowListIsExplicit(t *testing.T) {
+	if !core.CurrencyAllowed("usd", []string{"USD"}) {
+		t.Fatal("case-insensitive currency allow-list should match")
+	}
+	if core.CurrencyAllowed("AAA", []string{"USD"}) {
+		t.Fatal("unlisted syntactically valid currency must be rejected")
+	}
+}
+
 func TestMoneyRejectsCurrencyMismatch(t *testing.T) {
 	usd, err := core.ParseMoney("10", "USD")
 	if err != nil {
