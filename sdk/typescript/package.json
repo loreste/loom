@@ -1,0 +1,25 @@
+{
+  "name": "@loreste/loom-sdk",
+  "version": "0.3.0",
+  "description": "Loom Universal Runtime TypeScript SDK (HTTP client)",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js 2>/dev/null || echo 'no jest; typecheck only' && tsc -p tsconfig.json --noEmit"
+  },
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

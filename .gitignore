@@ -1,0 +1,33 @@
+# Binaries
+/loom
+*.exe
+*.test
+*.out
+
+# Local data / demos
+.loom-data/
+*.db
+worker.db
+ordersapp
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Coverage / fuzz
+coverage.out
+coverage.html
+**/testdata/fuzz/
+
+# SDK build artifacts
+sdk/rust/target/
+sdk/typescript/node_modules/
+sdk/typescript/dist/
+sdk/python/**/__pycache__/
+*.egg-info/
+
+# Env secrets
+.env
+.env.*

@@ -1,0 +1,18 @@
+[project]
+name = "loom-sdk"
+version = "0.3.0"
+description = "Loom Universal Runtime Python SDK (HTTP client)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+
+[project.urls]
+Repository = "https://github.com/loreste/loom"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["loom*"]
