@@ -1,11 +1,31 @@
 # Loom TypeScript SDK
 
+The package supports Node 18+ applications and other environments with a
+compatible `fetch` implementation. `NodeClient` is the named Node entry point;
+it uses the same governed HTTP execution contract as `Client`.
+
 ## Install from a checkout
 
 ```bash
 cd sdk/typescript
 npm install
 npm run build
+npm test
+```
+
+Node application:
+
+```ts
+import { NodeClient } from "@loreste/loom-sdk/node";
+
+const client = new NodeClient("http://127.0.0.1:8080", process.env.LOOM_TOKEN);
+const response = await client.call({
+  operation: "document.read",
+  operationVersion: "1",
+  boundary: "dev",
+  input: { id: "1" },
+});
+if (!response.Allowed) throw new Error(response.Denial?.Hint ?? "denied");
 ```
 
 The client talks to a running Loom HTTP adapter; authorization remains

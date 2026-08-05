@@ -190,7 +190,7 @@ func TestFinancialGuardZeroValueDeniesMoney(t *testing.T) {
 		t.Fatalf("Unlimited opt-in denied: %s", res.Message)
 	}
 	// Configured limits unchanged.
-	g3 := &guardrails.FinancialGuard{MaxAmount: 100}
+	g3 := &guardrails.FinancialGuard{MaxAmount: core.Money{Units: 100, Currency: "USD"}}
 	if res := g3.Check(context.Background(), core.Identity{}, op, req); !res.OK {
 		t.Fatalf("within-limit denied: %s", res.Message)
 	}

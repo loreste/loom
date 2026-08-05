@@ -37,6 +37,21 @@ type Store interface {
 	Abort(ctx context.Context, key string) error
 }
 
+// RecoveryRecord is durable work needed after execution when idempotency
+// completion could not be written synchronously.
+type RecoveryRecord struct {
+	ExecutionID string
+	Key         string
+	Fingerprint string
+	Response    core.Response
+	CreatedAt   time.Time
+}
+
+// RecoveryQueue accepts completion records for asynchronous reconciliation.
+type RecoveryQueue interface {
+	Enqueue(context.Context, RecoveryRecord) error
+}
+
 // MemoryStore is a process-local store with TTL eviction on read.
 type MemoryStore struct {
 	mu   sync.Mutex
@@ -194,7 +209,13 @@ func Fingerprint(req *core.Request) (string, error) {
 // CompositeKey builds a storage key scoped by principal + boundary + op + client key.
 // Prevents cross-principal key collision / theft.
 func CompositeKey(principal core.PrincipalID, boundary core.BoundaryID, op, clientKey string) string {
-	return string(principal) + "|" + string(boundary) + "|" + op + "|" + clientKey
+	return CompositeKeyVersioned(principal, boundary, op, core.DefaultOperationVersion, clientKey)
+}
+
+// CompositeKeyVersioned includes the operation contract version so a client
+// key can never replay a response produced by another contract.
+func CompositeKeyVersioned(principal core.PrincipalID, boundary core.BoundaryID, op, version, clientKey string) string {
+	return string(principal) + "|" + string(boundary) + "|" + op + "@" + core.NormalizeOperationVersion(version) + "|" + clientKey
 }
 
 // DefaultTTL when op does not specify.

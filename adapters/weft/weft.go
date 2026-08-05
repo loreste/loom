@@ -21,7 +21,8 @@ type StepCall struct {
 	// StepID is the step name within the workflow (metadata).
 	StepID string
 	// Operation is the Loom operation to execute (required).
-	Operation string
+	Operation        string
+	OperationVersion string
 	// BearerToken / credentials for authentication.
 	BearerToken string
 	// Scheme defaults to bearer; use "mtls" only when adapter injects verified cert material.
@@ -107,7 +108,8 @@ func (a *Adapter) Invoke(ctx context.Context, call StepCall) (core.Response, err
 	}
 
 	req := core.Request{
-		Operation: op,
+		Operation:        op,
+		OperationVersion: call.OperationVersion,
 		Credentials: core.Credentials{
 			Scheme: scheme,
 			Token:  call.BearerToken,

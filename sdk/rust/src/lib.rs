@@ -46,6 +46,12 @@ pub struct Response {
     pub idempotent_replay: Option<bool>,
     #[serde(rename = "Risk")]
     pub risk: Option<String>,
+    #[serde(rename = "Outcome")]
+    pub outcome: Option<String>,
+    #[serde(rename = "ExecutionID")]
+    pub execution_id: Option<String>,
+    #[serde(rename = "ReliabilityWarning")]
+    pub reliability_warning: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -58,6 +64,8 @@ pub struct ResourceRef {
 #[derive(Debug, Clone, Serialize)]
 struct ExecuteBody {
     operation: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    operation_version: Option<String>,
     boundary: String,
     input: Value,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -74,6 +82,7 @@ struct ExecuteBody {
 #[derive(Debug, Clone)]
 pub struct Call {
     pub operation: String,
+    pub operation_version: Option<String>,
     pub boundary: String,
     pub input: Value,
     pub resource: Option<ResourceRef>,
@@ -110,6 +119,7 @@ impl Client {
             .or_insert_with(|| "sdk-rust".into());
         let body = ExecuteBody {
             operation: call.operation,
+            operation_version: call.operation_version,
             boundary: call.boundary,
             input: call.input,
             fields: call.fields,
@@ -124,7 +134,7 @@ impl Client {
             .post(format!("{}/v1/execute", self.base_url))
             .header(CONTENT_TYPE, "application/json")
             .header("X-Loom-Protocol-Version", "1")
-            .header(USER_AGENT, "loom-rust-sdk/0.3")
+            .header(USER_AGENT, "loom-rust-sdk/0.1.3")
             .json(&body);
         if !bearer.is_empty() {
             req = req.header(AUTHORIZATION, format!("Bearer {bearer}"));
@@ -142,7 +152,7 @@ impl Client {
         let res = self
             .http
             .get(format!("{}/.well-known/loom.json", self.base_url))
-            .header(USER_AGENT, "loom-rust-sdk/0.4")
+            .header(USER_AGENT, "loom-rust-sdk/0.1.3")
             .header("X-Loom-Protocol-Version", "1")
             .send()
             .await?;
@@ -154,7 +164,7 @@ impl Client {
         let mut req = self
             .http
             .get(format!("{}/v1/openapi.json", self.base_url))
-            .header(USER_AGENT, "loom-rust-sdk/0.4")
+            .header(USER_AGENT, "loom-rust-sdk/0.1.3")
             .header("X-Loom-Protocol-Version", "1");
         if !self.token.is_empty() {
             req = req.header(AUTHORIZATION, format!("Bearer {}", self.token));
@@ -170,7 +180,7 @@ impl Client {
             .post(format!("{}/mcp", self.base_url))
             .header(CONTENT_TYPE, "application/json")
             .header("X-Loom-Protocol-Version", "1")
-            .header(USER_AGENT, "loom-rust-sdk/0.4")
+            .header(USER_AGENT, "loom-rust-sdk/0.1.3")
             .json(&rpc);
         if !self.token.is_empty() {
             req = req.header(AUTHORIZATION, format!("Bearer {}", self.token));
@@ -202,6 +212,7 @@ mod tests {
         let response = client
             .call(Call {
                 operation: std::env::var("LOOM_CONTRACT_OPERATION").expect("contract operation"),
+                operation_version: None,
                 boundary: std::env::var("LOOM_CONTRACT_BOUNDARY").expect("contract boundary"),
                 input: json!({}),
                 resource: None,

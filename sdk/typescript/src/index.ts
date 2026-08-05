@@ -26,6 +26,9 @@ export interface Response {
   AuditID?: string;
   IdempotentReplay?: boolean;
   Risk?: string;
+  Outcome?: string;
+  ExecutionID?: string;
+  ReliabilityWarning?: string;
 }
 
 export interface ResourceRef {
@@ -35,6 +38,7 @@ export interface ResourceRef {
 
 export interface CallOptions {
   operation: string;
+  operationVersion?: string;
   boundary: string;
   input?: Record<string, unknown>;
   resource?: ResourceRef;
@@ -57,6 +61,7 @@ export class Client {
     const url = `${this.baseUrl.replace(/\/$/, "")}/v1/execute`;
     const body = {
       operation: opts.operation,
+      operation_version: opts.operationVersion,
       boundary: opts.boundary,
       input: opts.input ?? {},
       fields: opts.fields,
@@ -70,7 +75,7 @@ export class Client {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       "X-Loom-Protocol-Version": "1",
-      "User-Agent": "loom-typescript-sdk/0.4",
+    "User-Agent": "loom-typescript-sdk/0.1.3",
     };
     const bearer = opts.token ?? this.token;
     if (bearer) headers["Authorization"] = `Bearer ${bearer}`;
@@ -125,7 +130,7 @@ export class Client {
     const url = `${this.baseUrl.replace(/\/$/, "")}/mcp`;
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
-      "User-Agent": "loom-typescript-sdk/0.4",
+      "User-Agent": "loom-typescript-sdk/0.1.3",
       "X-Loom-Protocol-Version": "1",
     };
     const bearer = token ?? this.token;
@@ -148,7 +153,7 @@ export class Client {
   ): Promise<Record<string, unknown>> {
     const url = `${this.baseUrl.replace(/\/$/, "")}${path}`;
     const headers: Record<string, string> = {
-      "User-Agent": "loom-typescript-sdk/0.4",
+  "User-Agent": "loom-typescript-sdk/0.1.3",
       "X-Loom-Protocol-Version": "1",
     };
     if (auth) {

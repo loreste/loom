@@ -169,7 +169,8 @@ func (a *Adapter) runExec(ctx context.Context, args []string) int {
 	}
 
 	req := core.Request{
-		Operation: op,
+		Operation:        op,
+		OperationVersion: flags["operation-version"],
 		Credentials: core.Credentials{
 			Scheme: "bearer",
 			Token:  token,

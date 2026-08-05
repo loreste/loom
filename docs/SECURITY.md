@@ -5,6 +5,12 @@ reviewed as an open-source project. This document describes the controls in
 the current repository and the responsibilities that remain with a deploying
 application.
 
+The current release uses exact `core.Money` values, validates declared output
+schemas after handlers return, and keeps input-field grants separate from
+output projection grants. If post-execution audit fails after a handler runs,
+Loom returns `executed_unconfirmed` with an `ExecutionID`; callers must
+reconcile before retrying a side-effecting operation.
+
 ## Runtime guarantees
 
 - Decisions default to deny.

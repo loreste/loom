@@ -13,14 +13,15 @@ import (
 
 // ToolCall is an MCP-shaped invocation (transport-agnostic).
 type ToolCall struct {
-	Name           string
-	Arguments      map[string]any
-	BearerToken    string
-	Boundary       string
-	IdempotencyKey string
-	ApprovalToken  string
-	Resource       *core.ResourceRef
-	Fields         []string
+	Name             string
+	OperationVersion string
+	Arguments        map[string]any
+	BearerToken      string
+	Boundary         string
+	IdempotencyKey   string
+	ApprovalToken    string
+	Resource         *core.ResourceRef
+	Fields           []string
 	// SessionID / ClientID are metadata only.
 	SessionID string
 	ClientID  string
@@ -59,7 +60,8 @@ func (a *Adapter) Call(ctx context.Context, call ToolCall) (core.Response, error
 		}
 	}
 	req := core.Request{
-		Operation: name,
+		Operation:        name,
+		OperationVersion: call.OperationVersion,
 		Credentials: core.Credentials{
 			Scheme: "bearer",
 			Token:  call.BearerToken,

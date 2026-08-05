@@ -25,6 +25,20 @@ func TestRegistryNoOverwrite(t *testing.T) {
 	}
 }
 
+func TestRegistryBindsExactOperationVersion(t *testing.T) {
+	r := core.NewRegistry()
+	if err := r.Register(&core.Operation{Name: "invoice.read", Version: "2"}, func(*core.ExecutionContext) (*core.Result, error) { return nil, nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.GetVersion("invoice.read", "1"); err == nil {
+		t.Fatal("mismatched operation version must be rejected")
+	}
+	op, err := r.GetVersion("invoice.read", "2")
+	if err != nil || op.Version != "2" {
+		t.Fatalf("exact version lookup failed: op=%+v err=%v", op, err)
+	}
+}
+
 func TestRegistryRejectsNilHandler(t *testing.T) {
 	r := core.NewRegistry()
 	if err := r.Register(&core.Operation{Name: "a"}, nil); err == nil {

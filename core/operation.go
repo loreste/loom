@@ -81,6 +81,13 @@ type IdempotencyPolicy struct {
 	TTLSeconds int
 }
 
+// QuotaPolicy makes charging semantics explicit. Quota is charged once a
+// handler starts by default; refunding a handler error is an opt-in contract
+// only for operations that can prove no external side effect was accepted.
+type QuotaPolicy struct {
+	RefundOnHandlerError bool
+}
+
 // ApprovalPolicy gates execution for elevated risk or effect classes.
 type ApprovalPolicy struct {
 	// Required forces an approval token or pending approval for every call.
@@ -95,6 +102,11 @@ type ApprovalPolicy struct {
 type Operation struct {
 	// Name is dotted, e.g. "document.read", "payment.capture".
 	Name string
+	// Version is an exact operation contract version. Empty is normalized to
+	// DefaultOperationVersion for compatibility with older registrations.
+	Version string
+	// DeprecatedAfter is migration metadata; execution still binds to Version.
+	DeprecatedAfter string
 
 	// Description is human-facing only; never used for authz.
 	Description string
@@ -122,6 +134,7 @@ type Operation struct {
 
 	Approval    ApprovalPolicy
 	Idempotency IdempotencyPolicy
+	Quota       QuotaPolicy
 
 	// SensitiveFields are redacted from audit/output unless explicitly permitted.
 	SensitiveFields []string

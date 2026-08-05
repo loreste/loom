@@ -75,7 +75,7 @@ allow.
 
 ## Status
 
-The current public release is `v0.1.1`. It is an early open-source release.
+The current public release is `v0.1.3`. It is an early open-source release.
 The runtime has been exercised internally and includes tests across its main
 packages. Production integrations, packaging, and documentation will continue
 to evolve with use.
@@ -105,7 +105,7 @@ go test -race ./...
 To add Loom to a Go application, use the tagged module release:
 
 ```bash
-go get github.com/loreste/loom@v0.1.1
+go get github.com/loreste/loom@v0.1.3
 ```
 
 Then register operations and call them through the application API:
@@ -133,7 +133,8 @@ if !response.Allowed {
 ```
 
 See [EMBED.md](docs/EMBED.md) for database registration, bootstrapping, and
-background jobs.
+background jobs. Language-specific Go, Python, TypeScript/Node, and Rust
+examples are in [SDK.md](docs/SDK.md).
 
 ## Optional network adapters
 

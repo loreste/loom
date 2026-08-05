@@ -59,6 +59,47 @@ func (c *Chain) Add(g Guardrail) {
 	c.items = append(c.items, g)
 }
 
+// Len reports the number of configured guardrails.
+func (c *Chain) Len() int {
+	if c == nil {
+		return 0
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return len(c.items)
+}
+
+// Has reports whether a named guardrail is configured.
+func (c *Chain) Has(name string) bool {
+	if c == nil || name == "" {
+		return false
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	for _, item := range c.items {
+		if item != nil && item.Name() == name {
+			return true
+		}
+	}
+	return false
+}
+
+// ValidateOperation enforces category-specific safety controls at the
+// operation boundary. An empty custom chain cannot accidentally make money or
+// administrative effects executable.
+func (c *Chain) ValidateOperation(op *core.Operation) error {
+	if c == nil || op == nil {
+		return fmt.Errorf("guardrails: chain or operation not configured")
+	}
+	if op.HasEffect(core.EffectMoney) && !c.Has("financial") {
+		return fmt.Errorf("guardrails: money operation requires financial guardrail")
+	}
+	if (op.HasEffect(core.EffectDelete) || op.HasEffect(core.EffectAdmin)) && !c.Has("production") {
+		return fmt.Errorf("guardrails: delete/admin operation requires production guardrail")
+	}
+	return nil
+}
+
 // Check runs all guardrails. Fail-closed on panic recovery as deny.
 func (c *Chain) Check(ctx context.Context, id core.Identity, op *core.Operation, req *core.Request) Result {
 	if c == nil {
@@ -113,7 +154,7 @@ func (SchemaGuard) Check(_ context.Context, _ core.Identity, op *core.Operation,
 	if input == nil {
 		input = map[string]any{}
 	}
-	if err := validateObject(schema, input); err != nil {
+	if err := ValidateSchema(op.InputSchema, input); err != nil {
 		return Result{Name: "schema", OK: false, Message: err.Error()}
 	}
 	return Result{Name: "schema", OK: true, Message: "schema valid"}
@@ -271,12 +312,12 @@ func num(v any) (float64, bool) {
 // operations are denied. Set Unlimited explicitly to opt out of ceilings.
 type FinancialGuard struct {
 	// MaxAmount absolute ceiling for input field "amount" (or AmountField).
-	MaxAmount   float64
+	MaxAmount   core.Money
 	AmountField string
 	// Unlimited explicitly disables ceilings (zero-value guard is deny, not unlimited).
 	Unlimited bool
 	// MaxByPrincipal optional per-principal ceilings.
-	MaxByPrincipal map[core.PrincipalID]float64
+	MaxByPrincipal map[core.PrincipalID]core.Money
 	mu             sync.RWMutex
 }
 
@@ -294,8 +335,15 @@ func (g *FinancialGuard) Check(_ context.Context, id core.Identity, op *core.Ope
 	if !ok {
 		return Result{Name: "financial", OK: false, Message: "money operation missing amount"}
 	}
-	amount, ok := num(raw)
-	if !ok || amount < 0 {
+	currency, _ := req.Input["currency"].(string)
+	if currency == "" {
+		currency = g.MaxAmount.Currency
+	}
+	if currency == "" {
+		currency = "XXX"
+	}
+	amount, err := core.ParseMoney(raw, currency)
+	if err != nil {
 		return Result{Name: "financial", OK: false, Message: "invalid amount"}
 	}
 	max := g.MaxAmount
@@ -306,11 +354,17 @@ func (g *FinancialGuard) Check(_ context.Context, id core.Identity, op *core.Ope
 		}
 	}
 	g.mu.RUnlock()
-	if max <= 0 && !g.Unlimited {
+	if !max.Valid() && !g.Unlimited {
 		return Result{Name: "financial", OK: false, Message: "financial guard has no limit configured (deny)"}
 	}
-	if max > 0 && amount > max {
-		return Result{Name: "financial", OK: false, Message: fmt.Sprintf("amount %v exceeds limit %v", amount, max)}
+	if !g.Unlimited {
+		cmp, err := amount.Compare(max)
+		if err != nil {
+			return Result{Name: "financial", OK: false, Message: "amount currency does not match limit"}
+		}
+		if cmp > 0 {
+			return Result{Name: "financial", OK: false, Message: "amount exceeds configured limit"}
+		}
 	}
 	return Result{Name: "financial", OK: true, Message: "within limit"}
 }
@@ -867,7 +921,7 @@ func redactPatternValue(v any) any {
 func DefaultChain() *Chain {
 	return NewChain(
 		SchemaGuard{},
-		&FinancialGuard{MaxAmount: 10_000},
+		&FinancialGuard{MaxAmount: core.Money{Units: 10_000, Currency: "USD"}},
 		NetworkGuard{},
 		FilesystemGuard{AllowedPrefixes: []string{"/data/", "/tmp/loom/"}},
 		&ProductionGuard{ProductionBoundaries: map[core.BoundaryID]struct{}{"prod": {}}},

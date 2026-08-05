@@ -1,5 +1,14 @@
 # Compatibility contracts
 
+## Operation versions and execution outcomes
+
+Every registered operation has an exact `Version` (default `"1"`). Requests
+select it with `operation_version`; an unknown or mismatched version is denied,
+and idempotency storage keys include the operation version. Responses may
+include `Outcome`, `ExecutionID`, and `ReliabilityWarning`.
+`executed_unconfirmed` means the handler may have run, so callers must
+reconcile before retrying a side-effecting operation.
+
 Loom adapters and SDKs share one execution contract. The current major
 protocol version is exposed as `X-Loom-Protocol-Version: 1` on HTTP responses;
 clients should record and alert on an unexpected version instead of guessing.

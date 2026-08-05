@@ -294,7 +294,7 @@ func NewPlatform(cfg Config) (*Platform, error) {
 	}
 
 	gr := guardrails.DefaultChain()
-	gr.Add(&guardrails.FinancialGuard{MaxAmount: 10_000})
+	gr.Add(&guardrails.FinancialGuard{MaxAmount: core.Money{Units: 10_000, Currency: "USD"}})
 	metrics := runtime.NewMetrics()
 
 	rt, err := runtime.New(runtime.Dependencies{
