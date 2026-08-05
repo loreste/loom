@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+package loom.v1;
+
+option go_package = "github.com/loreste/loom/adapters/grpc/gen/loom/v1;loomv1";
+
+// Runtime is the sole gRPC surface for Loom. There is no privileged path;
+// every Execute call is enforced by runtime.Runtime.Execute.
+service Runtime {
+  rpc Execute(ExecuteRequest) returns (ExecuteResponse);
+}
+
+message ExecuteRequest {
+  string operation = 1;
+  string boundary = 2;
+  // input_json is a JSON object (map). Empty or "{}" means empty input.
+  string input_json = 3;
+  string resource_type = 4;
+  string resource_id = 5;
+  repeated string fields = 6;
+  string idempotency_key = 7;
+  string approval_token = 8;
+  map<string, string> metadata = 9;
+  string trace_id = 10;
+}
+
+message ExecuteResponse {
+  bool allowed = 1;
+  string decision = 2;
+  // output_json is a JSON object; empty when denied.
+  string output_json = 3;
+  string denial_reason = 4;
+  string denial_message = 5;
+  string denial_step = 6;
+  bool denial_retryable = 7;
+  string denial_hint = 8;
+  string trace_id = 9;
+  string audit_id = 10;
+  bool idempotent_replay = 11;
+  string risk = 12;
+}

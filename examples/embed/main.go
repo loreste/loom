@@ -2,13 +2,12 @@
 //
 //	go run ./examples/embed/
 //
-// Flow: register user → open sqlite → enable db ops → call db.exec/db.query
+// Flow: Bootstrap → migrate → open DB → least-privilege grants → db.exec/db.query
 // through the full security pipeline (authn, policy, SQL guardrails, audit).
 package main
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -17,10 +16,9 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/loreste/loom/app"
+	"github.com/loreste/loom/config"
 	"github.com/loreste/loom/core"
 	"github.com/loreste/loom/db"
-	"github.com/loreste/loom/policy"
-	"github.com/loreste/loom/resource"
 )
 
 func main() {
@@ -33,58 +31,46 @@ func main() {
 func run() error {
 	ctx := context.Background()
 
-	// 1) Embed Loom — no server, no REST.
-	a, err := app.New(app.Config{})
-	if err != nil {
-		return err
-	}
-	defer a.Close()
-
-	// 2) Connect database (DSN never exposed back out of the registry).
-	sqldb, err := sql.Open("sqlite", "file:embeddemo?mode=memory&cache=shared")
-	if err != nil {
-		return err
-	}
-	defer sqldb.Close()
-	if _, err := sqldb.Exec(`
-		CREATE TABLE notes (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			body TEXT NOT NULL,
-			created_at TEXT NOT NULL
-		)`); err != nil {
-		return err
-	}
-	if err := a.DBs.RegisterDB("appdb", sqldb, db.Options{
-		AllowedTables:     []string{"notes"},
-		AllowedBoundaries: []core.BoundaryID{"dev"},
-		MaxRows:           50,
-		StatementTimeout:  3 * time.Second,
-	}); err != nil {
-		return err
-	}
-	if err := a.EnableDBOps(); err != nil {
-		return err
-	}
-
-	// 3) Identity + least privilege grants (default is DENY).
-	if err := a.AddUser("user:dev", "dev-token", "dev", []string{"db.query", "db.exec"}); err != nil {
-		return err
-	}
-	_ = a.AllowPolicy(policy.Rule{Principal: "user:dev", Boundary: "dev", Operation: "db.query", Priority: 10})
-	_ = a.AllowPolicy(policy.Rule{Principal: "user:dev", Boundary: "dev", Operation: "db.exec", Priority: 10})
-	_ = a.AllowResource(resource.Rule{
-		Principal: "user:dev", Boundary: "dev", Type: "db", ID: "appdb",
-		Operations: []string{"db.query", "db.exec"},
+	// One-shot embed setup: no server, no REST.
+	res, err := app.Bootstrap(ctx, app.BootstrapConfig{
+		DB: &config.AppDB{
+			URL:        "file:embeddemo?mode=memory&cache=shared",
+			Driver:     "sqlite",
+			Pool:       "appdb",
+			Tables:     []string{"notes"},
+			Boundaries: []core.BoundaryID{"dev"},
+			MaxRows:    50,
+		},
+		Migrations: []db.Migration{{
+			Version: 1,
+			Name:    "notes",
+			Up: `CREATE TABLE IF NOT EXISTS notes (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				body TEXT NOT NULL,
+				created_at TEXT NOT NULL
+			)`,
+		}},
+		EnableDBOps: true,
+		Users: []app.SeedUser{{
+			ID: "user:dev", Token: "dev-token", Home: "dev",
+			Caps: []string{"db.query", "db.exec"},
+			DB: &app.DBAccess{
+				Pool: "appdb", Query: true, Exec: true,
+			},
+		}},
 	})
-	_ = a.AllowFields("user:dev", "dev", "db.query", []string{"pool", "columns", "rows", "count", "truncated"})
-	_ = a.AllowFields("user:dev", "dev", "db.exec", []string{"pool", "rows_affected", "status"})
+	if err != nil {
+		return err
+	}
+	defer res.App.Close()
+	a := res.App
 
 	// Writes are high-risk → approval required.
 	if err := a.IssueApproval("note-appr", "user:dev", "db.exec", "dev", core.RiskCritical, time.Hour); err != nil {
 		return err
 	}
 
-	// 4) All data access goes through Loom.Call (same pipeline as HTTP would use).
+	// All data access goes through Loom.Call (same pipeline as HTTP would use).
 	write := a.Call(ctx, core.Request{
 		Operation:   "db.exec",
 		Credentials: core.Credentials{Token: "dev-token"},
@@ -118,7 +104,7 @@ func run() error {
 		return fmt.Errorf("read denied: %v", read.Denial)
 	}
 
-	// 5) Blocked: table outside allowlist
+	// Blocked: table outside allowlist
 	blocked := a.Call(ctx, core.Request{
 		Operation:   "db.query",
 		Credentials: core.Credentials{Token: "dev-token"},

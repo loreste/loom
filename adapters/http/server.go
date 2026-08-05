@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	loomgql "github.com/loreste/loom/adapters/graphql"
 	"github.com/loreste/loom/adapters/mcp"
 	"github.com/loreste/loom/catalog"
 	"github.com/loreste/loom/core"
@@ -45,6 +46,8 @@ type ServerConfig struct {
 	// MCP optional JSON-RPC tools/* server. When set, POST /mcp is registered.
 	// Never grants privilege — every tools/call still hits Runtime.Execute.
 	MCP *mcp.Server
+	// EnableGraphQL registers POST /graphql (mutation execute → Runtime.Execute).
+	EnableGraphQL bool
 	// OpenAPI enables GET /v1/openapi.json (capability-filtered). Requires
 	// Registry + Verifier; when either is nil the route is omitted.
 	Registry *core.Registry
@@ -106,6 +109,12 @@ func (s *Server) routes() {
 	if s.Config.MCP != nil {
 		s.mux.HandleFunc("POST /mcp", s.handleMCP)
 		s.mux.HandleFunc("GET /mcp", methodNotAllowed)
+	}
+	if s.Config.EnableGraphQL {
+		if h, err := loomgql.Handler(s.RT); err == nil {
+			s.mux.Handle("POST /graphql", h)
+			s.mux.HandleFunc("GET /graphql", methodNotAllowed)
+		}
 	}
 	if s.Config.Registry != nil && s.Config.Verifier != nil {
 		s.mux.HandleFunc("GET /v1/openapi.json", s.handleOpenAPI)
@@ -195,6 +204,9 @@ func (s *Server) handleNotFound(w http.ResponseWriter, r *http.Request) {
 		if s.Config.MCP != nil {
 			out["mcp"] = "POST /mcp"
 		}
+		if s.Config.EnableGraphQL {
+			out["graphql"] = "POST /graphql"
+		}
 		if s.Config.Registry != nil && s.Config.Verifier != nil {
 			out["openapi"] = "GET /v1/openapi.json"
 		}
@@ -210,6 +222,9 @@ func (s *Server) handleManifest(w http.ResponseWriter, _ *http.Request) {
 	m := catalog.DefaultManifest("loom")
 	if s.Config.MCP == nil {
 		m.MCPEndpoint = ""
+	}
+	if !s.Config.EnableGraphQL {
+		m.GraphQLEndpoint = ""
 	}
 	if s.Config.Registry == nil || s.Config.Verifier == nil {
 		m.OpenAPIEndpoint = ""

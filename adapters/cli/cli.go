@@ -244,6 +244,7 @@ func (a *Adapter) runServe(ctx context.Context, args []string) int {
 	if a.Platform != nil {
 		cfg.Registry = a.Platform.Registry
 		cfg.Verifier = a.Platform.Multi
+		cfg.EnableGraphQL = true
 		cfg.MCP = &mcp.Server{
 			Adapter:  mcp.New(rt),
 			Registry: a.Platform.Registry,

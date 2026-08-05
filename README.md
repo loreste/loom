@@ -115,7 +115,7 @@ Writes (`db.exec`) are **high risk** → approval + idempotency by default.
 | **`db`** | Secure pools, SQL guard, `db.query` / `db.exec` |
 | `runtime` | Permission pipeline |
 | `policy` / `identity` / `boundary` / … | Enforcement building blocks |
-| `adapters/*` | Optional HTTP / CLI / MCP / Weft |
+| `adapters/*` | Optional HTTP / CLI / MCP / GraphQL / gRPC / Weft |
 | `sdk/*` | Optional remote clients (still server-enforced) |
 
 ## Optional: HTTP later

@@ -139,6 +139,18 @@ _ = runner.Run(ctx) // each job → app.Call (full pipeline)
 
 Jobs are **not** a privilege bypass: denied ops still deny.
 
+### Optional adapters (same pipeline)
+
+| Edge | Path / API | Notes |
+|------|------------|--------|
+| HTTP | `POST /v1/execute` | Primary remote surface |
+| MCP | `POST /mcp` | JSON-RPC tools/list + tools/call |
+| GraphQL | `POST /graphql` | `mutation { execute(input: …) }` |
+| gRPC | `loom.v1.Runtime/Execute` | Proto in `adapters/grpc/proto` |
+| Weft | in-process adapter | Optional |
+
+None of these can bypass `Runtime.Execute`.
+
 ### MCP wire (optional agent edge)
 
 JSON-RPC 2.0 tools/list + tools/call over stdio **or** `POST /mcp` on the HTTP edge — same pipeline:

@@ -33,7 +33,7 @@ Primary path: `app.App` → `Call` → pipeline → handlers / `db.Executor`.
 | `runtime` | Pipeline owner |
 | `app` | Embed API (`New` / `Bootstrap` / `Call`); no server required |
 | `job` | Queue → `Call` (memory or SQL); not a privilege path |
-| `adapters/*` | Untrusted edge (HTTP / CLI / MCP wire / Weft) |
+| `adapters/*` | Untrusted edge (HTTP / CLI / MCP / GraphQL / gRPC / Weft) |
 
 ## Storage precedence
 

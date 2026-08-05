@@ -120,7 +120,9 @@ type Manifest struct {
 	// MCPEndpoint is the JSON-RPC tools/* wire path when the HTTP edge exposes it.
 	MCPEndpoint string `json:"mcp_endpoint,omitempty"`
 	// OpenAPIEndpoint is the capability-filtered OpenAPI document path.
-	OpenAPIEndpoint string   `json:"openapi_endpoint,omitempty"`
+	OpenAPIEndpoint string `json:"openapi_endpoint,omitempty"`
+	// GraphQLEndpoint is the GraphQL mutation execute path when enabled.
+	GraphQLEndpoint string   `json:"graphql_endpoint,omitempty"`
 	Auth            AuthInfo `json:"auth"`
 }
 
@@ -138,5 +140,6 @@ func DefaultManifest(service string) Manifest {
 		Auth:             AuthInfo{Schemes: []string{"bearer", "mtls"}},
 		MCPEndpoint:      "POST /mcp",
 		OpenAPIEndpoint:  "GET /v1/openapi.json",
+		GraphQLEndpoint:  "POST /graphql",
 	}
 }
