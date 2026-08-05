@@ -10,6 +10,11 @@ const resp = await c.call({
   resource: { type: "document", id: "1" },
   input: { id: "1" },
 });
-if (!resp.Allowed) throw new Error(resp.Denial?.Message);
+if (!resp.Allowed) throw new Error(resp.Denial?.Hint ?? resp.Denial?.Message);
 console.log(resp.Output);
+
+// Agent discovery
+const manifest = await c.manifest();
+const openapi = await c.openapi();
+const tools = await c.mcp({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} });
 ```

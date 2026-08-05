@@ -8,7 +8,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -16,8 +15,8 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/loreste/loom/app"
+	"github.com/loreste/loom/config"
 	"github.com/loreste/loom/core"
-	"github.com/loreste/loom/db"
 	"github.com/loreste/loom/domains/orders"
 )
 
@@ -30,45 +29,39 @@ func main() {
 
 func run() error {
 	ctx := context.Background()
-	a, err := app.New(app.Config{})
+
+	// One-shot: migrate → open pool → register domain → seed least-privilege user.
+	res, err := app.Bootstrap(ctx, app.BootstrapConfig{
+		DB: &config.AppDB{
+			URL:        "file:ordersapp?mode=memory&cache=shared",
+			Driver:     "sqlite",
+			Pool:       "main",
+			Tables:     []string{"orders"},
+			Boundaries: []core.BoundaryID{"dev"},
+			MaxRows:    100,
+		},
+		Migrations: orders.Migrations(),
+		Setup: func(a *app.App, pool string) error {
+			return orders.Register(a.Registry, orders.Deps{DBs: a.DBs, Pool: pool})
+		},
+		Users: []app.SeedUser{{
+			ID: "svc:checkout", Token: "checkout-token", Home: "dev",
+			Caps: []string{"order.create", "order.read"},
+			Ops: []app.SeedOp{
+				{Op: "order.create", ResType: "order", ResID: "*",
+					Fields: []string{"id", "customer", "sku", "qty", "status", "created_at"}},
+				{Op: "order.get", ResType: "order", ResID: "*",
+					Fields: []string{"id", "customer", "sku", "qty", "status", "created_at"}},
+				{Op: "order.list", ResType: "order", ResID: "*",
+					Fields: []string{"orders", "count"}},
+			},
+		}},
+	})
 	if err != nil {
 		return err
 	}
-	defer a.Close()
-
-	sqldb, err := sql.Open("sqlite", "file:ordersapp?mode=memory&cache=shared")
-	if err != nil {
-		return err
-	}
-	defer sqldb.Close()
-	if _, err := sqldb.Exec(orders.SchemaSQL); err != nil {
-		return err
-	}
-	if err := a.DBs.RegisterDB("main", sqldb, db.Options{
-		AllowedTables:     []string{"orders"},
-		AllowedBoundaries: []core.BoundaryID{"dev"},
-		MaxRows:           100,
-	}); err != nil {
-		return err
-	}
-
-	// Product ops (not raw SQL ops)
-	if err := orders.Register(a.Registry, orders.Deps{DBs: a.DBs, Pool: "main"}); err != nil {
-		return err
-	}
-
-	// Service identity — only order.* caps, no db.query/db.exec (cannot free-form SQL)
-	if err := a.AddUser("svc:checkout", "checkout-token", "dev", []string{
-		"order.create", "order.read",
-	}); err != nil {
-		return err
-	}
-	_ = a.GrantOp("svc:checkout", "dev", "order.create", "order", "*",
-		[]string{"id", "customer", "sku", "qty", "status", "created_at"})
-	_ = a.GrantOp("svc:checkout", "dev", "order.get", "order", "*",
-		[]string{"id", "customer", "sku", "qty", "status", "created_at"})
-	_ = a.GrantOp("svc:checkout", "dev", "order.list", "order", "*",
-		[]string{"orders", "count"})
+	defer res.App.Close()
+	a := res.App
 
 	// Create
 	created := a.Call(ctx, core.Request{

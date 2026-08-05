@@ -26,6 +26,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .await?;
     assert!(resp.allowed);
+
+    // Agent discovery
+    let _manifest = c.manifest().await?;
+    let _openapi = c.openapi().await?;
     Ok(())
 }
 ```

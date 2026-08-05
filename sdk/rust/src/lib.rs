@@ -22,6 +22,10 @@ pub struct Denial {
     pub message: Option<String>,
     #[serde(rename = "Step")]
     pub step: Option<String>,
+    #[serde(rename = "Retryable", default)]
+    pub retryable: Option<bool>,
+    #[serde(rename = "Hint", default)]
+    pub hint: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -130,5 +134,47 @@ impl Client {
         let res = req.send().await?;
         let parsed = res.json::<Response>().await?;
         Ok(parsed)
+    }
+
+    /// GET /.well-known/loom.json — unauthenticated discovery.
+    pub async fn manifest(&self) -> Result<Value, Error> {
+        let res = self
+            .http
+            .get(format!("{}/.well-known/loom.json", self.base_url))
+            .header(USER_AGENT, "loom-rust-sdk/0.4")
+            .send()
+            .await?;
+        Ok(res.json().await?)
+    }
+
+    /// GET /v1/openapi.json — capability-filtered OpenAPI document.
+    pub async fn openapi(&self) -> Result<Value, Error> {
+        let mut req = self
+            .http
+            .get(format!("{}/v1/openapi.json", self.base_url))
+            .header(USER_AGENT, "loom-rust-sdk/0.4");
+        if !self.token.is_empty() {
+            req = req.header(AUTHORIZATION, format!("Bearer {}", self.token));
+        }
+        let res = req.send().await?;
+        Ok(res.json().await?)
+    }
+
+    /// POST /mcp — one JSON-RPC MCP message.
+    pub async fn mcp(&self, rpc: Value) -> Result<Value, Error> {
+        let mut req = self
+            .http
+            .post(format!("{}/mcp", self.base_url))
+            .header(CONTENT_TYPE, "application/json")
+            .header(USER_AGENT, "loom-rust-sdk/0.4")
+            .json(&rpc);
+        if !self.token.is_empty() {
+            req = req.header(AUTHORIZATION, format!("Bearer {}", self.token));
+        }
+        let res = req.send().await?;
+        if res.status() == reqwest::StatusCode::NO_CONTENT {
+            return Ok(Value::Object(Default::default()));
+        }
+        Ok(res.json().await?)
     }
 }

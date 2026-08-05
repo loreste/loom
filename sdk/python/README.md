@@ -14,4 +14,11 @@ resp = c.call(
 )
 assert resp.allowed
 print(resp.output)
+
+# Agent discovery (server-enforced)
+print(c.manifest())                 # GET /.well-known/loom.json
+print(c.openapi())                   # capability-filtered OpenAPI
+specs = c.catalog_spec(boundary="dev")
+if not resp.allowed and resp.denial:
+    print(resp.denial.hint, resp.denial.retryable)
 ```

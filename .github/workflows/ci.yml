@@ -1,0 +1,62 @@
+name: ci
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  test:
+    name: go-test-race
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test (race)
+        run: go test -race ./...
+
+      - name: Fuzz runtime (short)
+        run: go test -fuzz=FuzzExecute -fuzztime=15s ./runtime/
+
+      - name: Build
+        run: go build ./...
+
+  # Optional Postgres integration when LOOM_DATABASE_URL is provided via secrets.
+  postgres:
+    name: postgres-integration
+    runs-on: ubuntu-latest
+    if: ${{ false }} # enable when LOOM_DATABASE_URL secret is configured
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: loom
+          POSTGRES_PASSWORD: loom
+          POSTGRES_DB: loom
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Integration
+        env:
+          LOOM_DATABASE_URL: postgres://loom:loom@127.0.0.1:5432/loom?sslmode=disable
+        run: go test ./store/postgres/ ./bootstrap/ -run Postgres -count=1

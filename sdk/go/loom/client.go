@@ -42,6 +42,8 @@ type HTTPClient struct {
 	Token string
 	// UserAgent optional.
 	UserAgent string
+	// MaxBodyBytes caps response bodies (default 1 MiB).
+	MaxBodyBytes int64
 }
 
 // NewHTTPClient creates a remote client. baseURL e.g. http://127.0.0.1:8080
@@ -52,18 +54,19 @@ func NewHTTPClient(baseURL, token string) *HTTPClient {
 		HTTPClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
+		MaxBodyBytes: 1 << 20,
 	}
 }
 
 type executeBody struct {
-	Operation      string              `json:"operation"`
-	Boundary       string              `json:"boundary"`
-	Input          map[string]any      `json:"input"`
-	Fields         []string            `json:"fields,omitempty"`
-	IdempotencyKey string              `json:"idempotency_key,omitempty"`
-	ApprovalToken  string              `json:"approval_token,omitempty"`
-	Resource       *core.ResourceRef   `json:"resource,omitempty"`
-	Metadata       map[string]string   `json:"metadata,omitempty"`
+	Operation      string                `json:"operation"`
+	Boundary       string                `json:"boundary"`
+	Input          map[string]any        `json:"input"`
+	Fields         []string              `json:"fields,omitempty"`
+	IdempotencyKey string                `json:"idempotency_key,omitempty"`
+	ApprovalToken  string                `json:"approval_token,omitempty"`
+	Resource       *core.ResourceRef     `json:"resource,omitempty"`
+	Metadata       map[string]string     `json:"metadata,omitempty"`
 	Delegation     *core.DelegationChain `json:"delegation,omitempty"`
 }
 
@@ -109,24 +112,119 @@ func (c *HTTPClient) Call(ctx context.Context, req core.Request) (core.Response,
 	if c.UserAgent != "" {
 		httpReq.Header.Set("User-Agent", c.UserAgent)
 	}
+	return c.doJSON(ctx, httpReq)
+}
+
+// Manifest fetches GET /.well-known/loom.json (unauthenticated discovery).
+func (c *HTTPClient) Manifest(ctx context.Context) (map[string]any, error) {
+	return c.getJSON(ctx, "/.well-known/loom.json", false)
+}
+
+// OpenAPI fetches GET /v1/openapi.json (capability-filtered; uses client token).
+func (c *HTTPClient) OpenAPI(ctx context.Context) (map[string]any, error) {
+	return c.getJSON(ctx, "/v1/openapi.json", true)
+}
+
+// CatalogSpec calls the governed catalog.spec operation and returns tool specs.
+func (c *HTTPClient) CatalogSpec(ctx context.Context, boundary string) (core.Response, error) {
+	if boundary == "" {
+		boundary = "dev"
+	}
+	return c.Call(ctx, core.Request{
+		Operation:   "catalog.spec",
+		Boundary:    core.BoundaryID(boundary),
+		Credentials: core.Credentials{Scheme: "bearer", Token: c.Token},
+		Input:       map[string]any{},
+	})
+}
+
+// MCP posts one JSON-RPC message to POST /mcp.
+// Bearer is taken from Token unless overridden.
+func (c *HTTPClient) MCP(ctx context.Context, rpcReq map[string]any) (map[string]any, error) {
+	if c == nil || c.BaseURL == "" {
+		return nil, fmt.Errorf("loom: http client not configured")
+	}
+	raw, err := json.Marshal(rpcReq)
+	if err != nil {
+		return nil, err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/mcp", bytes.NewReader(raw))
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if c.Token != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+c.Token)
+	}
+	if c.UserAgent != "" {
+		httpReq.Header.Set("User-Agent", c.UserAgent)
+	}
+	body, err := c.doRaw(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	if len(body) == 0 {
+		return map[string]any{}, nil // notification / 204
+	}
+	var out map[string]any
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil, fmt.Errorf("loom: invalid mcp response: %w", err)
+	}
+	return out, nil
+}
+
+func (c *HTTPClient) getJSON(ctx context.Context, path string, auth bool) (map[string]any, error) {
+	if c == nil || c.BaseURL == "" {
+		return nil, fmt.Errorf("loom: http client not configured")
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	if auth && c.Token != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+c.Token)
+	}
+	if c.UserAgent != "" {
+		httpReq.Header.Set("User-Agent", c.UserAgent)
+	}
+	body, err := c.doRaw(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	var out map[string]any
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil, fmt.Errorf("loom: invalid json: %w", err)
+	}
+	return out, nil
+}
+
+func (c *HTTPClient) doJSON(_ context.Context, httpReq *http.Request) (core.Response, error) {
+	body, err := c.doRaw(httpReq)
+	if err != nil {
+		return denySDK(err.Error()), err
+	}
+	var out core.Response
+	if err := json.Unmarshal(body, &out); err != nil {
+		return denySDK("invalid response"), fmt.Errorf("loom: invalid response: %w", err)
+	}
+	return out, nil
+}
+
+func (c *HTTPClient) doRaw(httpReq *http.Request) ([]byte, error) {
 	hc := c.HTTPClient
 	if hc == nil {
 		hc = http.DefaultClient
 	}
 	res, err := hc.Do(httpReq)
 	if err != nil {
-		return denySDK(err.Error()), err
+		return nil, err
 	}
 	defer res.Body.Close()
-	respBody, err := io.ReadAll(io.LimitReader(res.Body, 1<<20))
-	if err != nil {
-		return denySDK(err.Error()), err
+	limit := c.MaxBodyBytes
+	if limit <= 0 {
+		limit = 1 << 20
 	}
-	var out core.Response
-	if err := json.Unmarshal(respBody, &out); err != nil {
-		return denySDK("invalid response"), fmt.Errorf("loom: invalid response: %w", err)
-	}
-	return out, nil
+	return io.ReadAll(io.LimitReader(res.Body, limit))
 }
 
 func denySDK(msg string) core.Response {
