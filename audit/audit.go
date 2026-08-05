@@ -20,19 +20,19 @@ import (
 
 // Event is one immutable audit record.
 type Event struct {
-	ID        string          `json:"id"`
-	Timestamp time.Time       `json:"timestamp"`
-	TraceID   string          `json:"trace_id"`
-	Decision  string          `json:"decision"`
-	Reason    string          `json:"reason,omitempty"`
-	Step      string          `json:"step,omitempty"`
-	Message   string          `json:"message,omitempty"`
-	Principal string          `json:"principal,omitempty"`
-	Delegator string          `json:"delegator,omitempty"`
-	Boundary  string          `json:"boundary,omitempty"`
-	Operation string          `json:"operation"`
-	Resource  string          `json:"resource,omitempty"`
-	Risk      string          `json:"risk,omitempty"`
+	ID        string    `json:"id"`
+	Timestamp time.Time `json:"timestamp"`
+	TraceID   string    `json:"trace_id"`
+	Decision  string    `json:"decision"`
+	Reason    string    `json:"reason,omitempty"`
+	Step      string    `json:"step,omitempty"`
+	Message   string    `json:"message,omitempty"`
+	Principal string    `json:"principal,omitempty"`
+	Delegator string    `json:"delegator,omitempty"`
+	Boundary  string    `json:"boundary,omitempty"`
+	Operation string    `json:"operation"`
+	Resource  string    `json:"resource,omitempty"`
+	Risk      string    `json:"risk,omitempty"`
 	// Input is redacted.
 	Input map[string]any `json:"input,omitempty"`
 	// Metadata is redacted copy of request metadata (no tokens).
@@ -57,6 +57,9 @@ type MemorySink struct {
 	mu     sync.Mutex
 	Events []Event
 }
+
+// Durable reports whether audit records survive process restart.
+func (m *MemorySink) Durable() bool { return false }
 
 // Write appends an event.
 func (m *MemorySink) Write(_ context.Context, ev Event) error {
@@ -83,10 +86,16 @@ func (m *MemorySink) Snapshot() []Event {
 
 // WriterSink JSON-encodes events to an io.Writer (stdout, file).
 type WriterSink struct {
-	mu sync.Mutex
-	w  io.Writer
-	enc *json.Encoder
+	mu       sync.Mutex
+	w        io.Writer
+	enc      *json.Encoder
+	durable  bool
 }
+
+// Durable reports whether the writer is configured. Durability of the target
+// is the application's responsibility (for example, a persistent file or
+// managed log sink).
+func (s *WriterSink) Durable() bool { return s != nil && s.w != nil && s.durable }
 
 // NewWriterSink creates a JSONL sink.
 func NewWriterSink(w io.Writer) *WriterSink {
@@ -94,6 +103,15 @@ func NewWriterSink(w io.Writer) *WriterSink {
 		w = os.Stdout
 	}
 	return &WriterSink{w: w, enc: json.NewEncoder(w)}
+}
+
+// NewDurableWriterSink marks a writer whose caller has established durable
+// delivery (for example, an fsync-backed file or managed log exporter).
+// The sink cannot infer durability from io.Writer alone, so it is opt-in.
+func NewDurableWriterSink(w io.Writer) *WriterSink {
+	s := NewWriterSink(w)
+	s.durable = w != nil
+	return s
 }
 
 // Write encodes one event as a JSON line.
@@ -109,6 +127,22 @@ func (s *WriterSink) Write(_ context.Context, ev Event) error {
 // MultiSink fans out to multiple sinks; returns first error but attempts all.
 type MultiSink struct {
 	Sinks []Sink
+}
+
+// Durable reports true only when every configured sink is durable. A fan-out
+// containing an in-memory sink is still useful for tests, but not sufficient
+// for production security-state validation.
+func (m *MultiSink) Durable() bool {
+	if m == nil || len(m.Sinks) == 0 {
+		return false
+	}
+	for _, sink := range m.Sinks {
+		d, ok := sink.(interface{ Durable() bool })
+		if !ok || !d.Durable() {
+			return false
+		}
+	}
+	return true
 }
 
 // Write fans out.

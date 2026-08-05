@@ -43,14 +43,14 @@ type Engine interface {
 
 // Record is a stored pre-approval.
 type Record struct {
-	TokenHash  string
-	Principal  core.PrincipalID
-	Operation  string
-	Boundary   core.BoundaryID
-	ExpiresAt  time.Time
-	MaxRisk    core.RiskLevel
-	Consumed   bool
-	SingleUse  bool
+	TokenHash string
+	Principal core.PrincipalID
+	Operation string
+	Boundary  core.BoundaryID
+	ExpiresAt time.Time
+	MaxRisk   core.RiskLevel
+	Consumed  bool
+	SingleUse bool
 }
 
 // MemoryEngine stores issued approval tokens.
@@ -63,6 +63,10 @@ type MemoryEngine struct {
 	mu     sync.Mutex
 	tokens map[string]*Record
 }
+
+// Durable reports whether approval state survives process restart. Memory
+// state is intentionally false so production constructors can reject it.
+func (e *MemoryEngine) Durable() bool { return false }
 
 // NewMemoryEngine creates an empty approval store.
 func NewMemoryEngine() *MemoryEngine {

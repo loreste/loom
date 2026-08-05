@@ -13,6 +13,8 @@ package app
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/loreste/loom/approval"
@@ -37,24 +39,47 @@ type Config struct {
 	AuditSink audit.Sink
 	// AllowAnonymous defaults false.
 	AllowAnonymous bool
+	// Environment is an application-owned deployment label. production makes
+	// durable security state and an injected verifier mandatory.
+	Environment string
+	// RequireDurableSecurityState rejects process-local approval, quota,
+	// idempotency, and audit implementations. Production implies this setting.
+	RequireDurableSecurityState bool
+	// Security dependencies are injectable so identity and durable stores remain
+	// application configuration rather than hidden package defaults.
+	IdentityVerifier identity.Verifier
+	ApprovalEngine   approval.Engine
+	QuotaLimiter     quotas.Limiter
+	IdempotencyStore idempotency.Store
+	BoundaryChecker  boundary.Checker
+	PolicyEngine     policy.Engine
+	ResourceChecker  resource.Checker
 }
 
 // App is an in-process Loom application.
 type App struct {
-	Runtime    *runtime.Runtime
-	Registry   *core.Registry
-	Verifier   *identity.MemoryVerifier
-	Boundary   *boundary.MemoryChecker
-	Policy     *policy.MemoryEngine
-	Resources  *resource.MemoryChecker
-	Fields     *resource.FieldFilter
-	Approval   *approval.MemoryEngine
-	Quotas     *quotas.MemoryLimiter
-	Idempotency *idempotency.MemoryStore
-	Guardrails *guardrails.Chain
-	DBs        *db.Registry
-	AuditSink  *audit.MemorySink
-	client     *loom.Client
+	Runtime          *runtime.Runtime
+	Registry         *core.Registry
+	Verifier         *identity.MemoryVerifier
+	Boundary         *boundary.MemoryChecker
+	Policy           *policy.MemoryEngine
+	Resources        *resource.MemoryChecker
+	Fields           *resource.FieldFilter
+	Approval         *approval.MemoryEngine
+	Quotas           *quotas.MemoryLimiter
+	Idempotency      *idempotency.MemoryStore
+	Guardrails       *guardrails.Chain
+	DBs              *db.Registry
+	AuditSink        *audit.MemorySink
+	VerifierEngine   identity.Verifier
+	BoundaryChecker  boundary.Checker
+	PolicyEngine     policy.Engine
+	ResourceChecker  resource.Checker
+	ApprovalEngine   approval.Engine
+	QuotaLimiter     quotas.Limiter
+	IdempotencyStore idempotency.Store
+	Metrics          *runtime.Metrics
+	client           *loom.Client
 }
 
 // New constructs a deny-by-default embedded runtime.
@@ -71,45 +96,110 @@ func New(cfg Config) (*App, error) {
 	memSink := &audit.MemorySink{}
 	var sink audit.Sink = memSink
 	if cfg.AuditSink != nil {
-		sink = &audit.MultiSink{Sinks: []audit.Sink{memSink, cfg.AuditSink}}
+		if cfg.RequireDurableSecurityState || strings.EqualFold(cfg.Environment, "production") {
+			sink = cfg.AuditSink
+		} else {
+			sink = &audit.MultiSink{Sinks: []audit.Sink{memSink, cfg.AuditSink}}
+		}
+	}
+	verifier := cfg.IdentityVerifier
+	if verifier == nil {
+		verifier = ver
+	}
+	boundaryChecker := cfg.BoundaryChecker
+	if boundaryChecker == nil {
+		boundaryChecker = bnd
+	}
+	policyEngine := cfg.PolicyEngine
+	if policyEngine == nil {
+		policyEngine = pol
+	}
+	resourceChecker := cfg.ResourceChecker
+	if resourceChecker == nil {
+		resourceChecker = res
+	}
+	approvalEngine := cfg.ApprovalEngine
+	if approvalEngine == nil {
+		approvalEngine = apr
+	}
+	quotaLimiter := cfg.QuotaLimiter
+	if quotaLimiter == nil {
+		quotaLimiter = q
+	}
+	idempotencyStore := cfg.IdempotencyStore
+	if idempotencyStore == nil {
+		idempotencyStore = idem
+	}
+	production := strings.EqualFold(cfg.Environment, "production")
+	if production {
+		cfg.RequireDurableSecurityState = true
+		if cfg.AllowAnonymous {
+			return nil, fmt.Errorf("%w: anonymous access is not allowed in production", core.ErrInvalidArgument)
+		}
+		if cfg.IdentityVerifier == nil {
+			return nil, fmt.Errorf("%w: production requires an injected identity verifier", core.ErrInvalidArgument)
+		}
+	}
+	if cfg.RequireDurableSecurityState {
+		for name, dep := range map[string]any{
+			"approval":    approvalEngine,
+			"quotas":      quotaLimiter,
+			"idempotency": idempotencyStore,
+			"audit":       sink,
+		} {
+			durable, ok := dep.(interface{ Durable() bool })
+			if !ok || !durable.Durable() {
+				return nil, fmt.Errorf("%w: %s dependency is process-local; inject a durable implementation", core.ErrInvalidArgument, name)
+			}
+		}
 	}
 	gr := guardrails.DefaultChain()
+	metrics := runtime.NewMetrics()
 	// SQL-bearing ops get schema + secrets; database package enforces SQL class.
 
 	rt, err := runtime.New(runtime.Dependencies{
 		Registry:       reg,
-		Verifier:       ver,
-		Boundary:       bnd,
-		Policy:         pol,
-		Resources:      res,
+		Verifier:       verifier,
+		Boundary:       boundaryChecker,
+		Policy:         policyEngine,
+		Resources:      resourceChecker,
 		Fields:         fields,
 		Guardrails:     gr,
 		Risk:           risk.NewSimpleEngine(),
 		RiskBlock:      &risk.Blocker{MaxAllowed: core.RiskCritical},
-		Approval:       apr,
-		Quotas:         q,
-		Idempotency:    idem,
+		Approval:       approvalEngine,
+		Quotas:         quotaLimiter,
+		Idempotency:    idempotencyStore,
 		Audit:          audit.NewLogger(sink),
+		Observer:       metrics,
 		AllowAnonymous: cfg.AllowAnonymous,
 	})
 	if err != nil {
 		return nil, err
 	}
 	a := &App{
-		Runtime:     rt,
-		Registry:    reg,
-		Verifier:    ver,
-		Boundary:    bnd,
-		Policy:      pol,
-		Resources:   res,
-		Fields:      fields,
-		Approval:    apr,
-		Quotas:      q,
-		Idempotency: idem,
-		Guardrails:  gr,
-		DBs:         db.NewRegistry(),
-		AuditSink:   memSink,
-		client:      loom.NewClient(rt),
+		Runtime:          rt,
+		Registry:         reg,
+		Verifier:         ver,
+		Boundary:         bnd,
+		Policy:           pol,
+		Resources:        res,
+		Fields:           fields,
+		Approval:         apr,
+		Quotas:           q,
+		Idempotency:      idem,
+		Guardrails:       gr,
+		DBs:              db.NewRegistry(),
+		AuditSink:        memSink,
+		VerifierEngine:   verifier,
+		BoundaryChecker:  boundaryChecker,
+		PolicyEngine:     policyEngine,
+		ResourceChecker:  resourceChecker,
+		ApprovalEngine:   approvalEngine,
+		QuotaLimiter:     quotaLimiter,
+		IdempotencyStore: idempotencyStore,
+		Metrics:          metrics,
+		client:           loom.NewClient(rt),
 	}
 	return a, nil
 }
@@ -159,7 +249,13 @@ func (a *App) EnableDBOps() error {
 
 // AddUser registers a static bearer principal (dev/simple deploy).
 func (a *App) AddUser(id core.PrincipalID, token string, home core.BoundaryID, caps []string) error {
-	if err := a.Verifier.Register(identity.StaticPrincipal{
+	registrar, ok := a.VerifierEngine.(interface {
+		Register(identity.StaticPrincipal) error
+	})
+	if !ok {
+		return fmt.Errorf("%w: configured verifier does not support static users", core.ErrInvalidArgument)
+	}
+	if err := registrar.Register(identity.StaticPrincipal{
 		ID: id, Token: token, Boundary: home, Type: "user", Capabilities: caps,
 	}); err != nil {
 		return err
@@ -172,17 +268,31 @@ func (a *App) AddUser(id core.PrincipalID, token string, home core.BoundaryID, c
 
 // GrantBoundary adds membership.
 func (a *App) GrantBoundary(id core.PrincipalID, b core.BoundaryID) error {
-	return a.Boundary.Grant(id, b)
+	grantor, ok := a.BoundaryChecker.(interface {
+		Grant(core.PrincipalID, core.BoundaryID) error
+	})
+	if !ok {
+		return fmt.Errorf("%w: configured boundary checker does not support grants", core.ErrInvalidArgument)
+	}
+	return grantor.Grant(id, b)
 }
 
 // AllowPolicy adds an explicit allow rule.
 func (a *App) AllowPolicy(rule policy.Rule) error {
-	return a.Policy.AddRule(rule)
+	adder, ok := a.PolicyEngine.(interface{ AddRule(policy.Rule) error })
+	if !ok {
+		return fmt.Errorf("%w: configured policy engine does not support grants", core.ErrInvalidArgument)
+	}
+	return adder.AddRule(rule)
 }
 
 // AllowResource adds a resource ACL rule.
 func (a *App) AllowResource(rule resource.Rule) error {
-	return a.Resources.Grant(rule)
+	grantor, ok := a.ResourceChecker.(interface{ Grant(resource.Rule) error })
+	if !ok {
+		return fmt.Errorf("%w: configured resource checker does not support grants", core.ErrInvalidArgument)
+	}
+	return grantor.Grant(rule)
 }
 
 // AllowFields grants output fields.
@@ -192,7 +302,11 @@ func (a *App) AllowFields(id core.PrincipalID, b core.BoundaryID, op string, fie
 
 // IssueApproval issues a single-use approval token (tests/admin tooling).
 func (a *App) IssueApproval(token string, principal core.PrincipalID, op string, boundary core.BoundaryID, maxRisk core.RiskLevel, ttl time.Duration) error {
-	return a.Approval.Issue(token, principal, op, boundary, maxRisk, ttl)
+	issuer, ok := a.ApprovalEngine.(approval.Issuer)
+	if !ok {
+		return fmt.Errorf("%w: approval issuer is not configured", core.ErrInvalidArgument)
+	}
+	return issuer.Issue(token, principal, op, boundary, maxRisk, ttl)
 }
 
 // DBExecutor returns a scoped DB handle for custom handlers (still SQL-guarded).

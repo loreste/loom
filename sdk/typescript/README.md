@@ -1,5 +1,16 @@
 # Loom TypeScript SDK
 
+## Install from a checkout
+
+```bash
+cd sdk/typescript
+npm install
+npm run build
+```
+
+The client talks to a running Loom HTTP adapter; authorization remains
+server-side. See [`../../docs/INSTALL.md`](../../docs/INSTALL.md).
+
 ```ts
 import { Client } from "@loreste/loom-sdk";
 

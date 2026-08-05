@@ -17,6 +17,9 @@ type ApprovalStore struct {
 	db *sql.DB
 }
 
+// Durable reports that approval state is persisted in PostgreSQL.
+func (s *ApprovalStore) Durable() bool { return s != nil && s.db != nil }
+
 // NewApprovalStore wraps db.
 func NewApprovalStore(db *sql.DB) *ApprovalStore {
 	return &ApprovalStore{db: db}
@@ -75,12 +78,12 @@ func (s *ApprovalStore) Evaluate(ctx context.Context, id core.Identity, op *core
 
 	h := hashTok(token)
 	var (
-		principal string
-		operation string
+		principal   string
+		operation   string
 		recBoundary string
-		maxRisk   int
-		expires   time.Time
-		consumed  bool
+		maxRisk     int
+		expires     time.Time
+		consumed    bool
 	)
 	err := s.db.QueryRowContext(ctx, `
 		SELECT principal, operation, boundary, max_risk, expires_at, consumed
@@ -133,11 +136,11 @@ func (s *ApprovalStore) Consume(ctx context.Context, id core.Identity, op *core.
 	defer func() { _ = tx.Rollback() }()
 
 	var (
-		principal string
-		operation string
+		principal   string
+		operation   string
 		recBoundary string
-		expires   time.Time
-		singleUse bool
+		expires     time.Time
+		singleUse   bool
 	)
 	err = tx.QueryRowContext(ctx, `
 		SELECT principal, operation, boundary, expires_at, single_use

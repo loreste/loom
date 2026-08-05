@@ -31,20 +31,21 @@ import (
 
 // Dependencies for the runtime. Missing security deps fail closed at Execute.
 type Dependencies struct {
-	Registry   *core.Registry
-	Verifier   identity.Verifier
-	Delegation identity.DelegationValidator // optional; required only if request has delegation
-	Boundary   boundary.Checker
-	Policy     policy.Engine
-	Resources  resource.Checker
-	Fields     *resource.FieldFilter
-	Guardrails *guardrails.Chain
-	Risk       risk.Engine
-	RiskBlock  *risk.Blocker // optional hard risk ceiling
-	Approval   approval.Engine
-	Quotas     quotas.Limiter
+	Registry    *core.Registry
+	Verifier    identity.Verifier
+	Delegation  identity.DelegationValidator // optional; required only if request has delegation
+	Boundary    boundary.Checker
+	Policy      policy.Engine
+	Resources   resource.Checker
+	Fields      *resource.FieldFilter
+	Guardrails  *guardrails.Chain
+	Risk        risk.Engine
+	RiskBlock   *risk.Blocker // optional hard risk ceiling
+	Approval    approval.Engine
+	Quotas      quotas.Limiter
 	Idempotency idempotency.Store
-	Audit      *audit.Logger
+	Audit       *audit.Logger
+	Observer    Observer
 
 	// AllowAnonymous is false by default. If true, empty credentials get a synthetic
 	// unauthenticated identity that still must pass policy (almost always deny).
@@ -107,6 +108,28 @@ func New(deps Dependencies) (*Runtime, error) {
 // Execute runs the full permission pipeline. Never panics out; recovers to deny.
 func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Response) {
 	var start time.Time
+	defer func() {
+		defer func() { _ = recover() }()
+		if rt != nil && rt.deps.Observer != nil {
+			step, reason := "complete", "allow"
+			if resp.Denial != nil {
+				step, reason = resp.Denial.Step, resp.Denial.Reason
+			}
+			duration := time.Duration(0)
+			if !start.IsZero() {
+				duration = time.Since(start)
+			}
+			rt.deps.Observer.Observe(Observation{
+				Operation:        req.Operation,
+				Boundary:         req.Boundary,
+				Decision:         resp.Decision,
+				Reason:           reason,
+				Step:             step,
+				Duration:         duration,
+				IdempotentReplay: resp.IdempotentReplay,
+			})
+		}
+	}()
 	// Register recovery FIRST: a panicking custom Clock (or anything else below)
 	// must not escape Execute. panicDeny tolerates a zero start and itself
 	// recovers if deny/audit panic during recovery.

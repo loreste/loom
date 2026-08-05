@@ -228,10 +228,10 @@ func (a *Adapter) runServe(ctx context.Context, args []string) int {
 	if a.PlatformFactory != nil && (dataDir != "" || dbURL != "" || redisURL != "") {
 		fc := true
 		p, err := a.PlatformFactory(bootstrap.Config{
-			DataDir:          dataDir,
-			DatabaseURL:      dbURL,
-			RedisURL:         redisURL,
-			FailClosedQuotas: &fc,
+			DataDir:               dataDir,
+			DatabaseURL:           dbURL,
+			RedisURL:              redisURL,
+			FailClosedQuotas:      &fc,
 			RequireDurable:        envCfg.RequireDurable,
 			DisableDemoPrincipals: envCfg.DisableDemoPrincipals,
 		})
@@ -261,6 +261,9 @@ func (a *Adapter) runServe(ctx context.Context, args []string) int {
 	}
 
 	cfg := loomhttp.ServerConfig{Addr: addr, Ready: readyFn}
+	if a.Platform != nil {
+		cfg.Metrics = a.Platform.Metrics
+	}
 	if envCfg.HTTPRateLimitPerMin > 0 {
 		cfg.RateLimit = loomhttp.RateLimitConfig{RequestsPerMinute: envCfg.HTTPRateLimitPerMin}
 	}

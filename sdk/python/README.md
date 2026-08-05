@@ -1,5 +1,16 @@
 # Loom Python SDK
 
+## Install from a checkout
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install ./sdk/python
+```
+
+The client talks to a running Loom HTTP adapter; authorization remains
+server-side. See [`../../docs/INSTALL.md`](../../docs/INSTALL.md).
+
 Thin HTTP client for the Loom Universal Runtime. **All authorization happens server-side.**
 
 ```python

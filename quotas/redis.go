@@ -17,13 +17,16 @@ import (
 //   - Lua script increments atomically and rolls back on exceed
 //   - Unconfigured keys still unlimited unless Config.DefaultLimit > 0
 type RedisLimiter struct {
-	Cfg        *Config
-	Client     redis.Cmdable
+	Cfg    *Config
+	Client redis.Cmdable
 	// FailClosed when true (default), store errors deny the request.
 	FailClosed bool
 	// KeyPrefix defaults to "loom:quota".
 	KeyPrefix string
 }
+
+// Durable reports whether quota state is backed by Redis.
+func (l *RedisLimiter) Durable() bool { return l != nil && l.Client != nil }
 
 // NewRedisLimiter wraps a redis client. FailClosed defaults to true.
 func NewRedisLimiter(client redis.Cmdable, cfg *Config) *RedisLimiter {
@@ -157,7 +160,9 @@ func (l *RedisLimiter) Ready(ctx context.Context) error {
 	if l == nil || l.Client == nil {
 		return fmt.Errorf("quotas: redis not configured")
 	}
-	if pinger, ok := l.Client.(interface{ Ping(context.Context) *redis.StatusCmd }); ok {
+	if pinger, ok := l.Client.(interface {
+		Ping(context.Context) *redis.StatusCmd
+	}); ok {
 		return pinger.Ping(ctx).Err()
 	}
 	// Fallback: GET a missing key

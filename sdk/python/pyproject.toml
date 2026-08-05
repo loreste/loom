@@ -1,6 +1,6 @@
 [project]
 name = "loom-sdk"
-version = "0.1.0"
+version = "0.1.1"
 description = "Loom Universal Runtime Python SDK (HTTP client)"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -8,6 +8,12 @@ license = { text = "Apache-2.0" }
 
 [project.urls]
 Repository = "https://github.com/loreste/loom"
+
+[project.optional-dependencies]
+dev = [
+    "build>=1.2",
+    "mypy>=1.11",
+]
 
 [build-system]
 requires = ["setuptools>=61"]

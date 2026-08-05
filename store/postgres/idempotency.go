@@ -17,6 +17,9 @@ type IdempotencyStore struct {
 	db *sql.DB
 }
 
+// Durable reports that idempotency state is persisted in PostgreSQL.
+func (s *IdempotencyStore) Durable() bool { return s != nil && s.db != nil }
+
 // NewIdempotencyStore wraps db.
 func NewIdempotencyStore(db *sql.DB) *IdempotencyStore {
 	return &IdempotencyStore{db: db}
@@ -28,10 +31,10 @@ func (s *IdempotencyStore) Get(ctx context.Context, key string) (*idempotency.St
 		return nil, false, nil
 	}
 	var (
-		fp      string
-		respRaw []byte
+		fp       string
+		respRaw  []byte
 		inFlight bool
-		exp     time.Time
+		exp      time.Time
 	)
 	err := s.db.QueryRowContext(ctx, `
 		SELECT fingerprint, response, in_flight, expires_at

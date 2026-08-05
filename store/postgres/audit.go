@@ -17,6 +17,9 @@ type AuditSink struct {
 	db *sql.DB
 }
 
+// Durable reports that audit records are persisted in PostgreSQL.
+func (s *AuditSink) Durable() bool { return s != nil && s.db != nil }
+
 // NewAuditSink wraps db.
 func NewAuditSink(db *sql.DB) *AuditSink {
 	return &AuditSink{db: db}

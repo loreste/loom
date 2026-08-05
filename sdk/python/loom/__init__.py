@@ -113,7 +113,7 @@ class Client:
         """GET /v1/openapi.json — capability-filtered OpenAPI document."""
         return self._get_json("/v1/openapi.json", auth=True, token=token)
 
-    def catalog_spec(self, *, boundary: str = "dev", token: Optional[str] = None) -> Response:
+    def catalog_spec(self, *, boundary: str, token: Optional[str] = None) -> Response:
         """Call governed catalog.spec for full tool specs."""
         return self.call("catalog.spec", boundary=boundary, input={}, token=token)
 
@@ -123,6 +123,7 @@ class Client:
         data = json.dumps(dict(rpc)).encode("utf-8")
         req = urllib.request.Request(url, data=data, method="POST")
         req.add_header("Content-Type", "application/json")
+        req.add_header("X-Loom-Protocol-Version", "1")
         req.add_header("User-Agent", self.user_agent)
         bearer = token if token is not None else self.token
         if bearer:
@@ -149,7 +150,9 @@ class Client:
         data = json.dumps(body).encode("utf-8")
         req = urllib.request.Request(url, data=data, method="POST")
         req.add_header("Content-Type", "application/json")
+        req.add_header("X-Loom-Protocol-Version", "1")
         req.add_header("User-Agent", self.user_agent)
+        req.add_header("X-Loom-Protocol-Version", "1")
         bearer = token if token is not None else self.token
         if bearer:
             req.add_header("Authorization", f"Bearer {bearer}")
