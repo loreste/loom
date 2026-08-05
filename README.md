@@ -14,12 +14,12 @@ an ORM, and not a replacement for careful application design.
 
 ## Why it exists
 
-A lot of internal tools and agent-facing apps end up with the same mess:
+A lot of internal tools end up with the same mess:
 
 - Product code that talks straight to the database
 - Authz rules scattered across middleware, SQL, and ad-hoc checks
 - A growing pile of endpoints that each reimplement “who can do what”
-- When agents or workers show up, another surface to secure
+- Workers or other callers that need the same rules without a second stack
 
 Loom is aimed at that middle ground: **named operations go through one
 pipeline**, and the pipeline is deny-by-default. If you need network access
@@ -56,7 +56,6 @@ go test -race ./...
 go run ./examples/embed/         # governed SQL against SQLite in-process
 go run ./examples/orders-app/    # product ops; callers never send SQL
 go run ./examples/worker/        # jobs that only run via Call
-go run ./examples/agent-client/  # discovery → MCP / execute (demo tokens)
 ```
 
 Embedding without a server:
@@ -71,7 +70,7 @@ resp := a.Call(ctx, core.Request{
     // …
 })
 if !resp.Allowed {
-    // Denial has a stable reason, plus hint/retryable for agents
+    // Denial has a stable reason (and optional hint / retryable)
 }
 ```
 

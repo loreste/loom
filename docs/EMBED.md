@@ -55,8 +55,6 @@ Agents consume a Loom app without a bespoke REST API:
    codes plus agent-actionable `hint` and `retryable` fields; internal error detail
    is recorded in audit only, never returned to callers.
 
-End-to-end walkthrough: `go run ./examples/agent-client/`.
-
 ## Connecting databases
 
 | Driver | Import | `OpenDB` driver name |
