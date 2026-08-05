@@ -39,8 +39,20 @@ func ValidateSchema(document []byte, value any) error {
 }
 
 const (
-	maxSchemaDepth = 32
-	maxSchemaNodes = 10_000
+	// MaxSchemaDepth bounds nested objects and arrays.
+	MaxSchemaDepth = 32
+	// MaxSchemaNodes bounds the number of values visited during validation.
+	MaxSchemaNodes = 10_000
+	// MaxSchemaProperties bounds object width, including undeclared fields.
+	MaxSchemaProperties = 1_000
+	// MaxSchemaArrayItems bounds arrays even when maxItems is omitted.
+	MaxSchemaArrayItems = 10_000
+	// MaxSchemaStringRunes bounds string length even when maxLength is omitted.
+	MaxSchemaStringRunes = 1_000_000
+	// MaxSchemaPatternBytes bounds regular-expression source length.
+	MaxSchemaPatternBytes = 256
+	// MaxSchemaCollectionItems bounds schema enum and required collections.
+	MaxSchemaCollectionItems = 1_000
 )
 
 type schemaBudget struct{ nodes int }
@@ -53,6 +65,13 @@ var supportedSchemaKeywords = map[string]struct{}{
 }
 
 func validateSchemaKeywords(schema map[string]any) error {
+	return validateSchemaKeywordsAtDepth(schema, 0)
+}
+
+func validateSchemaKeywordsAtDepth(schema map[string]any, depth int) error {
+	if depth > MaxSchemaDepth {
+		return fmt.Errorf("schema nesting limit exceeded")
+	}
 	for key := range schema {
 		if _, ok := supportedSchemaKeywords[key]; !ok {
 			return fmt.Errorf("unsupported schema keyword %q", key)
@@ -69,12 +88,15 @@ func validateSchemaKeywords(schema map[string]any) error {
 		if !ok {
 			return fmt.Errorf("properties must be an object")
 		}
+		if len(m) > MaxSchemaProperties {
+			return fmt.Errorf("schema property limit exceeded")
+		}
 		for name, raw := range m {
 			child, ok := raw.(map[string]any)
 			if !ok {
 				return fmt.Errorf("property %q has invalid schema", name)
 			}
-			if err := validateSchemaKeywords(child); err != nil {
+			if err := validateSchemaKeywordsAtDepth(child, depth+1); err != nil {
 				return fmt.Errorf("property %q: %w", name, err)
 			}
 		}
@@ -83,6 +105,9 @@ func validateSchemaKeywords(schema map[string]any) error {
 		items, ok := required.([]any)
 		if !ok {
 			return fmt.Errorf("required must be an array")
+		}
+		if len(items) > MaxSchemaCollectionItems {
+			return fmt.Errorf("required collection limit exceeded")
 		}
 		for _, item := range items {
 			name, ok := item.(string)
@@ -101,7 +126,7 @@ func validateSchemaKeywords(schema map[string]any) error {
 		if !ok {
 			return fmt.Errorf("items must be a schema object")
 		}
-		if err := validateSchemaKeywords(child); err != nil {
+		if err := validateSchemaKeywordsAtDepth(child, depth+1); err != nil {
 			return fmt.Errorf("items: %w", err)
 		}
 	}
@@ -110,7 +135,7 @@ func validateSchemaKeywords(schema map[string]any) error {
 		if !ok {
 			return fmt.Errorf("pattern must be a string")
 		}
-		if len(pat) > 256 {
+		if len(pat) > MaxSchemaPatternBytes {
 			return fmt.Errorf("pattern too long")
 		}
 		if _, err := regexp.Compile(pat); err != nil {
@@ -124,6 +149,22 @@ func validateSchemaKeywords(schema map[string]any) error {
 			}
 		}
 	}
+	if n, ok := schemaInt(schema, "maxLength"); ok && n > MaxSchemaStringRunes {
+		return fmt.Errorf("maxLength exceeds Loom Schema limit")
+	}
+	if n, ok := schemaInt(schema, "maxItems"); ok && n > MaxSchemaArrayItems {
+		return fmt.Errorf("maxItems exceeds Loom Schema limit")
+	}
+	if min, ok := schemaInt(schema, "minLength"); ok {
+		if max, exists := schemaInt(schema, "maxLength"); exists && min > max {
+			return fmt.Errorf("minLength exceeds maxLength")
+		}
+	}
+	if min, ok := schemaInt(schema, "minItems"); ok {
+		if max, exists := schemaInt(schema, "maxItems"); exists && min > max {
+			return fmt.Errorf("minItems exceeds maxItems")
+		}
+	}
 	for _, key := range []string{"minimum", "maximum"} {
 		if raw, ok := schema[key]; ok {
 			if _, ok := exactNumber(raw); !ok {
@@ -134,6 +175,15 @@ func validateSchemaKeywords(schema map[string]any) error {
 	if unique, ok := schema["uniqueItems"]; ok {
 		if _, ok := unique.(bool); !ok {
 			return fmt.Errorf("uniqueItems must be boolean")
+		}
+	}
+	if enum, ok := schema["enum"]; ok {
+		items, ok := enum.([]any)
+		if !ok {
+			return fmt.Errorf("enum must be an array")
+		}
+		if len(items) > MaxSchemaCollectionItems {
+			return fmt.Errorf("enum collection limit exceeded")
 		}
 	}
 	return nil
@@ -149,11 +199,11 @@ func validSchemaType(t string) bool {
 }
 
 func validateSchemaValue(schema map[string]any, value any, depth int, budget *schemaBudget) error {
-	if depth > maxSchemaDepth {
+	if depth > MaxSchemaDepth {
 		return fmt.Errorf("schema nesting limit exceeded")
 	}
 	budget.nodes++
-	if budget.nodes > maxSchemaNodes {
+	if budget.nodes > MaxSchemaNodes {
 		return fmt.Errorf("schema value node limit exceeded")
 	}
 	if err := validateSchemaKeywords(schema); err != nil {
@@ -194,6 +244,9 @@ func validateSchemaValue(schema map[string]any, value any, depth int, budget *sc
 		if n, ok := schemaInt(schema, "minItems"); ok && len(arr) < n {
 			return fmt.Errorf("too few items")
 		}
+		if len(arr) > MaxSchemaArrayItems {
+			return fmt.Errorf("array item limit exceeded")
+		}
 		if n, ok := schemaInt(schema, "maxItems"); ok && len(arr) > n {
 			return fmt.Errorf("too many items")
 		}
@@ -214,6 +267,9 @@ func validateSchemaValue(schema map[string]any, value any, depth int, budget *sc
 			return fmt.Errorf("expected string")
 		}
 		length := utf8.RuneCountInString(s)
+		if length > MaxSchemaStringRunes {
+			return fmt.Errorf("string rune limit exceeded")
+		}
 		if n, ok := schemaInt(schema, "minLength"); ok && length < n {
 			return fmt.Errorf("string too short")
 		}
@@ -257,6 +313,9 @@ func validateSchemaValue(schema map[string]any, value any, depth int, budget *sc
 }
 
 func validateSchemaObject(schema map[string]any, input map[string]any, depth int, budget *schemaBudget) error {
+	if len(input) > MaxSchemaProperties {
+		return fmt.Errorf("object property limit exceeded")
+	}
 	if raw, ok := schema["required"]; ok {
 		for _, item := range raw.([]any) {
 			name := item.(string)

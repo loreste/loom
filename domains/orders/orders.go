@@ -51,6 +51,7 @@ func Register(reg *core.Registry, deps Deps) error {
 		Risk:        core.RiskMedium,
 		Effects:     []core.Effect{core.EffectWrite},
 		Idempotency: core.IdempotencyPolicy{Required: true, TTLSeconds: 3600},
+		Quota:       core.QuotaPolicy{Enabled: true},
 	}, func(ec *core.ExecutionContext) (*core.Result, error) {
 		return handleCreate(ec, deps)
 	}); err != nil {

@@ -101,3 +101,20 @@ func TestFileEngineBoundaryMismatch(t *testing.T) {
 		t.Fatal("dev token must still approve in dev")
 	}
 }
+
+func TestMemoryEngineBindsApprovalToOperationVersion(t *testing.T) {
+	e := approval.NewMemoryEngine()
+	if err := e.IssueVersioned("tok-v2", "user:bob", "payment.capture", "2", "dev", core.RiskCritical, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	id := core.Identity{ID: "user:bob"}
+	opV1 := approvalOp()
+	opV2 := *opV1
+	opV2.Version = "2"
+	if dec := e.Evaluate(context.Background(), id, opV1, core.RiskHigh, "dev", "tok-v2"); dec.Approved {
+		t.Fatal("v2 approval must not authorize v1 operation")
+	}
+	if dec := e.Evaluate(context.Background(), id, &opV2, core.RiskHigh, "dev", "tok-v2"); !dec.Approved {
+		t.Fatalf("v2 approval should authorize v2 operation: %+v", dec)
+	}
+}

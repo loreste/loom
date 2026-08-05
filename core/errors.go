@@ -210,6 +210,7 @@ var (
 	ErrNotFound        = errors.New("loom: not found")
 	ErrAlreadyExists   = errors.New("loom: already exists")
 	ErrInvalidArgument = errors.New("loom: invalid argument")
+	ErrUnauthorized    = errors.New("loom: unauthorized")
 	ErrNotImplemented  = errors.New("loom: not implemented")
 	ErrUnavailable     = errors.New("loom: unavailable")
 )

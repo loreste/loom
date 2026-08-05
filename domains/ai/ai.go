@@ -36,8 +36,8 @@ func Register(reg *core.Registry) error {
 		Risk:        core.RiskMedium,
 		Effects:     []core.Effect{core.EffectAI, core.EffectRead},
 		// Critical risk not default; approval when elevated by risk engine for agents
-		Approval:    core.ApprovalPolicy{MinRisk: core.RiskHigh},
-		Idempotency: core.IdempotencyPolicy{Required: false},
+		Approval:        core.ApprovalPolicy{MinRisk: core.RiskHigh},
+		Idempotency:     core.IdempotencyPolicy{Required: false},
 		SensitiveFields: []string{"system_prompt", "tools_raw"},
 	}, handleComplete); err != nil {
 		return err
@@ -62,6 +62,7 @@ func Register(reg *core.Registry) error {
 		Effects:     []core.Effect{core.EffectAI, core.EffectExec},
 		Approval:    core.ApprovalPolicy{MinRisk: core.RiskHigh},
 		Idempotency: core.IdempotencyPolicy{Required: true, TTLSeconds: 300},
+		Quota:       core.QuotaPolicy{Enabled: true},
 	}, handleToolCall)
 }
 

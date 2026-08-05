@@ -39,6 +39,7 @@ func Register(reg *core.Registry) error {
 		Effects:     []core.Effect{core.EffectWrite, core.EffectExec},
 		Approval:    core.ApprovalPolicy{MinRisk: core.RiskHigh, Effects: []core.Effect{core.EffectExec}},
 		Idempotency: core.IdempotencyPolicy{Required: true, TTLSeconds: 3600},
+		Quota:       core.QuotaPolicy{Enabled: true},
 	}, handleRelease); err != nil {
 		return err
 	}
@@ -61,6 +62,7 @@ func Register(reg *core.Registry) error {
 		Effects:     []core.Effect{core.EffectExec},
 		Approval:    core.ApprovalPolicy{MinRisk: core.RiskHigh},
 		Idempotency: core.IdempotencyPolicy{Required: true, TTLSeconds: 600},
+		Quota:       core.QuotaPolicy{Enabled: true},
 	}, handleRestart); err != nil {
 		return err
 	}
@@ -75,6 +77,7 @@ func Register(reg *core.Registry) error {
 		Effects:     []core.Effect{core.EffectDelete, core.EffectAdmin, core.EffectExec},
 		Approval:    core.ApprovalPolicy{Required: true},
 		Idempotency: core.IdempotencyPolicy{Required: true, TTLSeconds: 3600},
+		Quota:       core.QuotaPolicy{Enabled: true},
 	}, handleDestroy)
 }
 

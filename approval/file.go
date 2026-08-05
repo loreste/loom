@@ -87,6 +87,11 @@ func (e *FileEngine) persistLocked() error {
 
 // Issue implements Issuer.
 func (e *FileEngine) Issue(token string, principal core.PrincipalID, op string, boundary core.BoundaryID, maxRisk core.RiskLevel, ttl time.Duration) error {
+	return e.IssueVersioned(token, principal, op, core.DefaultOperationVersion, boundary, maxRisk, ttl)
+}
+
+// IssueVersioned binds an approval token to one exact operation version.
+func (e *FileEngine) IssueVersioned(token string, principal core.PrincipalID, op string, version string, boundary core.BoundaryID, maxRisk core.RiskLevel, ttl time.Duration) error {
 	if e == nil {
 		return fmt.Errorf("%w: nil engine", core.ErrInvalidArgument)
 	}
@@ -106,13 +111,14 @@ func (e *FileEngine) Issue(token string, principal core.PrincipalID, op string, 
 		return fmt.Errorf("%w: approval token already issued", core.ErrAlreadyExists)
 	}
 	e.tokens[h] = &Record{
-		TokenHash: h,
-		Principal: principal,
-		Operation: op,
-		Boundary:  boundary,
-		ExpiresAt: time.Now().Add(ttl),
-		MaxRisk:   maxRisk,
-		SingleUse: true,
+		TokenHash:        h,
+		Principal:        principal,
+		Operation:        op,
+		OperationVersion: core.NormalizeOperationVersion(version),
+		Boundary:         boundary,
+		ExpiresAt:        time.Now().Add(ttl),
+		MaxRisk:          maxRisk,
+		SingleUse:        true,
 	}
 	return e.persistLocked()
 }

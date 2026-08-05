@@ -75,7 +75,7 @@ allow.
 
 ## Status
 
-The current public release is `v0.1.3`. It is an early open-source release.
+The current public release is `v0.1.4`. It is an early open-source release.
 The runtime has been exercised internally and includes tests across its main
 packages. Production integrations, packaging, and documentation will continue
 to evolve with use.
@@ -105,7 +105,7 @@ go test -race ./...
 To add Loom to a Go application, use the tagged module release:
 
 ```bash
-go get github.com/loreste/loom@v0.1.3
+go get github.com/loreste/loom@v0.1.4
 ```
 
 Then register operations and call them through the application API:
@@ -149,6 +149,8 @@ go run ./cmd/loom serve --addr=:8080 --grpc-addr=:9090
 | Interface | Entry point |
 | --- | --- |
 | HTTP | `POST /v1/execute` |
+| Execution status | `GET /v1/executions/{execution_id}` |
+| Execution reconcile | `POST /v1/executions/{execution_id}/reconcile` |
 | Discovery | `GET /.well-known/loom.json` |
 | OpenAPI | `GET /v1/openapi.json` |
 | MCP | `POST /mcp` |
@@ -172,7 +174,9 @@ Read:
 - [TENANCY.md](docs/TENANCY.md) and the [tenant example](examples/tenancy/README.md)
   for application and database isolation;
 - [OBSERVABILITY.md](docs/OBSERVABILITY.md) for metrics and tracing; and
-- [COMPATIBILITY.md](docs/COMPATIBILITY.md) for protocol and SDK contracts.
+- [COMPATIBILITY.md](docs/COMPATIBILITY.md) for protocol and SDK contracts;
+- [SCHEMA.md](docs/SCHEMA.md) for the bounded input and output schema contract; and
+- [SDK.md](docs/SDK.md) for installation and examples for Go, Weft, Python, Node.js, TypeScript, and Rust.
 
 ## Repository layout
 

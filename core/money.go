@@ -11,8 +11,10 @@ import (
 // Money is an exact, non-negative monetary value.
 //
 // Units are whole currency units and Nanos is the fractional part in
-// 10^-9 units. Currency is an ISO-4217-style code and is compared
-// case-insensitively. Money is deliberately not represented by float64.
+// 10^-9 units. Currency is an uppercase three-letter code and is compared
+// case-insensitively. The syntax alone does not establish that a code is an
+// ISO-4217 currency; operations should use AllowedCurrencies when that
+// distinction matters. Money is deliberately not represented by float64.
 type Money struct {
 	Units    int64  `json:"units"`
 	Nanos    int32  `json:"nanos"`
@@ -25,6 +27,64 @@ func (m Money) IsZero() bool { return m.Units == 0 && m.Nanos == 0 }
 // Valid reports whether the value is canonical and usable for limits.
 func (m Money) Valid() bool {
 	return m.Units >= 0 && m.Nanos >= 0 && m.Nanos < 1_000_000_000 && validCurrency(m.Currency)
+}
+
+// CurrencyCode returns the canonical uppercase currency code.
+func (m Money) CurrencyCode() string { return strings.ToUpper(strings.TrimSpace(m.Currency)) }
+
+// MoneyDelta is a signed exact monetary adjustment. Money remains
+// non-negative for payment amounts and ceilings; ledgers and reversals should
+// use MoneyDelta instead of weakening those invariants.
+//
+// Negative values use negative Units and/or Nanos. Canonical values keep both
+// components on the same side of zero, for example {-2, -500000000}.
+type MoneyDelta struct {
+	Units    int64  `json:"units"`
+	Nanos    int32  `json:"nanos"`
+	Currency string `json:"currency"`
+}
+
+// Valid reports whether the signed value is canonical.
+func (d MoneyDelta) Valid() bool {
+	if !validCurrency(d.Currency) || d.Nanos <= -1_000_000_000 || d.Nanos >= 1_000_000_000 {
+		return false
+	}
+	return d.Units == 0 || d.Nanos == 0 || (d.Units > 0 && d.Nanos > 0) || (d.Units < 0 && d.Nanos < 0)
+}
+
+// Compare compares signed values with the same currency.
+func (d MoneyDelta) Compare(other MoneyDelta) (int, error) {
+	if !d.Valid() || !other.Valid() {
+		return 0, fmt.Errorf("invalid money delta")
+	}
+	if !strings.EqualFold(d.Currency, other.Currency) {
+		return 0, fmt.Errorf("currency mismatch")
+	}
+	if d.Units < other.Units || (d.Units == other.Units && d.Nanos < other.Nanos) {
+		return -1, nil
+	}
+	if d.Units > other.Units || (d.Units == other.Units && d.Nanos > other.Nanos) {
+		return 1, nil
+	}
+	return 0, nil
+}
+
+// CurrencyAllowed reports whether code is included in a case-insensitive
+// explicit allow-list. An empty list means no list was configured.
+func CurrencyAllowed(code string, allowed []string) bool {
+	if len(allowed) == 0 {
+		return true
+	}
+	code = strings.ToUpper(strings.TrimSpace(code))
+	if !validCurrency(code) {
+		return false
+	}
+	for _, candidate := range allowed {
+		if strings.EqualFold(code, strings.TrimSpace(candidate)) {
+			return true
+		}
+	}
+	return false
 }
 
 // Compare compares values with the same currency.

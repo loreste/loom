@@ -204,6 +204,20 @@ func TestFinancialGuardZeroValueDeniesMoney(t *testing.T) {
 	}
 }
 
+func TestFinancialGuardRejectsUnlistedCurrency(t *testing.T) {
+	g := &guardrails.FinancialGuard{
+		MaxAmount:     core.Money{Units: 100, Currency: "USD"},
+		MaxByCurrency: map[string]core.Money{"USD": {Units: 100, Currency: "USD"}, "EUR": {Units: 100, Currency: "EUR"}},
+	}
+	op := &core.Operation{Effects: []core.Effect{core.EffectMoney}, AllowedCurrencies: []string{"USD", "EUR"}}
+	if result := g.Check(context.Background(), core.Identity{}, op, &core.Request{Input: map[string]any{"amount": "1", "currency": "AAA"}}); result.OK {
+		t.Fatal("syntactically valid but unlisted currency must be denied")
+	}
+	if result := g.Check(context.Background(), core.Identity{}, op, &core.Request{Input: map[string]any{"amount": "1", "currency": "EUR"}}); !result.OK {
+		t.Fatalf("allowed currency should pass: %+v", result)
+	}
+}
+
 func TestSchemaPatternCacheDeniesBadPatterns(t *testing.T) {
 	op := &core.Operation{
 		InputSchema: []byte(`{"type":"object","properties":{"id":{"type":"string","pattern":"[unclosed"}}}`),

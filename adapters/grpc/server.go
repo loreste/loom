@@ -61,7 +61,8 @@ func (s *Server) Execute(ctx context.Context, req *loomv1.ExecuteRequest) (*loom
 	}
 
 	coreReq := core.Request{
-		Operation: req.Operation,
+		Operation:        req.Operation,
+		OperationVersion: req.OperationVersion,
 		Credentials: core.Credentials{
 			Scheme: "bearer",
 			Token:  token,
@@ -149,12 +150,16 @@ func decodeInputJSON(s string) (map[string]any, error) {
 
 func toProto(resp core.Response) *loomv1.ExecuteResponse {
 	out := &loomv1.ExecuteResponse{
-		Allowed:          resp.Allowed,
-		Decision:         resp.Decision.String(),
-		TraceId:          resp.TraceID,
-		AuditId:          resp.AuditID,
-		IdempotentReplay: resp.IdempotentReplay,
-		Risk:             resp.Risk.String(),
+		Allowed:            resp.Allowed,
+		Decision:           resp.Decision.String(),
+		TraceId:            resp.TraceID,
+		AuditId:            resp.AuditID,
+		IdempotentReplay:   resp.IdempotentReplay,
+		Risk:               resp.Risk.String(),
+		OperationVersion:   resp.OperationVersion,
+		Outcome:            resp.Outcome.String(),
+		ExecutionId:        resp.ExecutionID,
+		ReliabilityWarning: resp.ReliabilityWarning,
 	}
 	if resp.Output != nil {
 		b, err := json.Marshal(resp.Output)

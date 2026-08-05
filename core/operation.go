@@ -85,6 +85,9 @@ type IdempotencyPolicy struct {
 // handler starts by default; refunding a handler error is an opt-in contract
 // only for operations that can prove no external side effect was accepted.
 type QuotaPolicy struct {
+	// Enabled explicitly opts an operation into quota accounting in production.
+	// Development and test runtimes retain the historical default-on behavior.
+	Enabled              bool
 	RefundOnHandlerError bool
 }
 
@@ -128,6 +131,11 @@ type Operation struct {
 
 	// Effects list side-effect classes.
 	Effects []Effect
+
+	// AllowedCurrencies is an explicit policy list for money operations. An
+	// empty list preserves the configured FinancialGuard currency behavior; a
+	// non-empty list rejects every other syntactically valid currency code.
+	AllowedCurrencies []string
 
 	// Limits are soft metadata; quotas package enforces hard limits.
 	Limits map[string]int64

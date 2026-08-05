@@ -28,13 +28,13 @@ func RegisterOps(reg *core.Registry, dbs *Registry) error {
 		"additionalProperties":false
 	}`)
 	if err := reg.Register(&core.Operation{
-		Name:        OpQuery,
-		Description: "Run a parameterized read query on a registered pool",
-		InputSchema: querySchema,
-		Permissions: []string{"db.query"},
-		Resources:   []string{"db"},
-		Risk:        core.RiskMedium,
-		Effects:     []core.Effect{core.EffectRead},
+		Name:            OpQuery,
+		Description:     "Run a parameterized read query on a registered pool",
+		InputSchema:     querySchema,
+		Permissions:     []string{"db.query"},
+		Resources:       []string{"db"},
+		Risk:            core.RiskMedium,
+		Effects:         []core.Effect{core.EffectRead},
 		SensitiveFields: []string{"sql"},
 	}, func(ec *core.ExecutionContext) (*core.Result, error) {
 		return handleQuery(ec, dbs)
@@ -44,15 +44,16 @@ func RegisterOps(reg *core.Registry, dbs *Registry) error {
 
 	execSchema := querySchema
 	return reg.Register(&core.Operation{
-		Name:        OpExec,
-		Description: "Run a parameterized write statement on a registered pool",
-		InputSchema: execSchema,
-		Permissions: []string{"db.exec"},
-		Resources:   []string{"db"},
-		Risk:        core.RiskHigh,
-		Effects:     []core.Effect{core.EffectWrite},
-		Approval:    core.ApprovalPolicy{MinRisk: core.RiskHigh},
-		Idempotency: core.IdempotencyPolicy{Required: true, TTLSeconds: 3600},
+		Name:            OpExec,
+		Description:     "Run a parameterized write statement on a registered pool",
+		InputSchema:     execSchema,
+		Permissions:     []string{"db.exec"},
+		Resources:       []string{"db"},
+		Risk:            core.RiskHigh,
+		Effects:         []core.Effect{core.EffectWrite},
+		Approval:        core.ApprovalPolicy{MinRisk: core.RiskHigh},
+		Idempotency:     core.IdempotencyPolicy{Required: true, TTLSeconds: 3600},
+		Quota:           core.QuotaPolicy{Enabled: true},
 		SensitiveFields: []string{"sql"},
 	}, func(ec *core.ExecutionContext) (*core.Result, error) {
 		return handleExec(ec, dbs)

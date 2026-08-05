@@ -18,7 +18,7 @@ examples below assume `LOOM_TOKEN` and a running server.
 ## Go
 
 ```bash
-go get github.com/loreste/loom@v0.1.3
+go get github.com/loreste/loom@v0.1.4
 ```
 
 ```go
@@ -59,7 +59,7 @@ response, err := client.Invoke(ctx, loomweft.StepCall{
 ## Python
 
 ```bash
-python -m pip install loom-sdk==0.1.3
+python -m pip install loom-sdk==0.1.4
 ```
 
 ```python
@@ -82,7 +82,7 @@ The package requires Node 18 or newer. Browser-compatible callers import
 point.
 
 ```bash
-npm install @loreste/loom-sdk@0.1.3
+npm install @loreste/loom-sdk@0.1.4
 ```
 
 ```ts
@@ -102,7 +102,7 @@ provided for tests or older runtimes.
 
 ```toml
 [dependencies]
-loom-sdk = "0.1.3"
+loom-sdk = "0.1.4"
 ```
 
 ```rust
@@ -119,6 +119,9 @@ let response = client.call(loom_sdk::Call {
 }).await?;
 ```
 
-Every SDK exposes `Outcome`, `ExecutionID`, and `ReliabilityWarning` when the
-server returns them. For `executed_unconfirmed`, query operation status or
-reconcile using the execution ID before retrying a side-effecting call.
+Every SDK exposes `Outcome`, `ExecutionID`, `OperationVersion`, and
+`ReliabilityWarning` when the server returns them. For
+`executed_unconfirmed`, query `GET /v1/executions/{execution_id}` or use the
+runtime status API, then reconcile with an explicit outcome before retrying a
+side-effecting call. `retry_recording` only retries durable recording; it
+never reruns the handler.

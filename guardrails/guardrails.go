@@ -318,7 +318,10 @@ type FinancialGuard struct {
 	Unlimited bool
 	// MaxByPrincipal optional per-principal ceilings.
 	MaxByPrincipal map[core.PrincipalID]core.Money
-	mu             sync.RWMutex
+	// MaxByCurrency optionally supplies a separate exact ceiling per currency.
+	// It is useful when an operation explicitly allows more than one currency.
+	MaxByCurrency map[string]core.Money
+	mu            sync.RWMutex
 }
 
 func (g *FinancialGuard) Name() string { return "financial" }
@@ -346,8 +349,16 @@ func (g *FinancialGuard) Check(_ context.Context, id core.Identity, op *core.Ope
 	if err != nil {
 		return Result{Name: "financial", OK: false, Message: "invalid amount"}
 	}
+	if !core.CurrencyAllowed(amount.Currency, op.AllowedCurrencies) {
+		return Result{Name: "financial", OK: false, Message: "currency is not allowed for this operation"}
+	}
 	max := g.MaxAmount
 	g.mu.RLock()
+	if g.MaxByCurrency != nil {
+		if m, exists := g.MaxByCurrency[amount.CurrencyCode()]; exists {
+			max = m
+		}
+	}
 	if g.MaxByPrincipal != nil {
 		if m, exists := g.MaxByPrincipal[id.ID]; exists {
 			max = m

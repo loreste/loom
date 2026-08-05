@@ -39,6 +39,32 @@ func TestRegistryBindsExactOperationVersion(t *testing.T) {
 	}
 }
 
+func TestRegistryKeepsHandlersBoundToVersions(t *testing.T) {
+	r := core.NewRegistry()
+	h1 := func(*core.ExecutionContext) (*core.Result, error) {
+		return &core.Result{Output: map[string]any{"version": "1"}}, nil
+	}
+	h2 := func(*core.ExecutionContext) (*core.Result, error) {
+		return &core.Result{Output: map[string]any{"version": "2"}}, nil
+	}
+	if err := r.Register(&core.Operation{Name: "versioned", Version: "1"}, h1); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Register(&core.Operation{Name: "versioned", Version: "2"}, h2); err != nil {
+		t.Fatal(err)
+	}
+	got, err := r.GetVersion("versioned", "2")
+	if err != nil || got.Version != "2" {
+		t.Fatalf("version 2 lookup failed: %+v %v", got, err)
+	}
+	if _, err := r.GetVersion("versioned", "3"); err == nil {
+		t.Fatal("unknown version must deny")
+	}
+	if _, err := r.HandlerVersion("versioned", "2"); err != nil {
+		t.Fatal("version-specific handler missing")
+	}
+}
+
 func TestRegistryRejectsNilHandler(t *testing.T) {
 	r := core.NewRegistry()
 	if err := r.Register(&core.Operation{Name: "a"}, nil); err == nil {

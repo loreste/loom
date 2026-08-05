@@ -76,6 +76,9 @@ type Request struct {
 	// OperationVersion binds this request to an exact registered contract.
 	// Empty selects DefaultOperationVersion.
 	OperationVersion string
+	// ExecutionID is runtime-assigned and never accepted as caller authority.
+	// Adapters must not populate it.
+	ExecutionID string `json:"-"`
 
 	// Credentials for authentication. Optional only if verifier accepts anonymous (default: no).
 	Credentials Credentials
@@ -165,6 +168,9 @@ type Response struct {
 	Outcome Outcome
 	// ExecutionID identifies this execution attempt for reconciliation.
 	ExecutionID string
+	// OperationVersion is the exact registered contract selected for this
+	// response. It is the normalized default for an unknown operation.
+	OperationVersion string
 	// Decision is allow/deny/require_approval.
 	Decision Decision
 	// Denial populated when not allowed.

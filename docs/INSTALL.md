@@ -37,7 +37,7 @@ exact release tag; it does not guess a version.
 
 ```bash
 export LOOM_REPOSITORY=loreste/loom
-export LOOM_VERSION=v0.1.3
+export LOOM_VERSION=v0.1.4
 curl --fail --location https://raw.githubusercontent.com/${LOOM_REPOSITORY}/${LOOM_VERSION}/scripts/install.sh | sh
 ~/.local/bin/loom version
 ```
@@ -62,7 +62,7 @@ configuration are supplied at runtime.
 ## Add Loom to a Go application
 
 ```bash
-go get github.com/loreste/loom@v0.1.3
+go get github.com/loreste/loom@v0.1.4
 ```
 
 Use the embed API to register operations, identities, boundaries, policies,

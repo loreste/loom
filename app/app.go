@@ -22,6 +22,7 @@ import (
 	"github.com/loreste/loom/boundary"
 	"github.com/loreste/loom/core"
 	"github.com/loreste/loom/db"
+	"github.com/loreste/loom/execution"
 	"github.com/loreste/loom/guardrails"
 	"github.com/loreste/loom/idempotency"
 	"github.com/loreste/loom/identity"
@@ -39,11 +40,11 @@ type Config struct {
 	AuditSink audit.Sink
 	// AllowAnonymous defaults false.
 	AllowAnonymous bool
-	// Environment is an application-owned deployment label. production makes
-	// durable security state and an injected verifier mandatory.
+	// Environment is an application-owned deployment label. Production requires
+	// an injected verifier and validates durable capabilities per operation.
 	Environment string
-	// RequireDurableSecurityState rejects process-local approval, quota,
-	// idempotency, and audit implementations. Production implies this setting.
+	// RequireDurableSecurityState rejects process-local state globally. Use it
+	// when every registered operation must have durable security backends.
 	RequireDurableSecurityState bool
 	// Security dependencies are injectable so identity and durable stores remain
 	// application configuration rather than hidden package defaults.
@@ -51,6 +52,7 @@ type Config struct {
 	ApprovalEngine   approval.Engine
 	QuotaLimiter     quotas.Limiter
 	IdempotencyStore idempotency.Store
+	ExecutionStore   execution.Store
 	BoundaryChecker  boundary.Checker
 	PolicyEngine     policy.Engine
 	ResourceChecker  resource.Checker
@@ -80,6 +82,7 @@ type App struct {
 	TenantResolver   runtime.TenantResolver
 	QuotaLimiter     quotas.Limiter
 	IdempotencyStore idempotency.Store
+	ExecutionStatus  execution.Store
 	Metrics          *runtime.Metrics
 	client           *loom.Client
 }
@@ -133,8 +136,11 @@ func New(cfg Config) (*App, error) {
 	if idempotencyStore == nil {
 		idempotencyStore = idem
 	}
+	executionStore := cfg.ExecutionStore
+	if executionStore == nil {
+		executionStore = execution.NewMemoryStore()
+	}
 	if production {
-		cfg.RequireDurableSecurityState = true
 		if cfg.AllowAnonymous {
 			return nil, fmt.Errorf("%w: anonymous access is not allowed in production", core.ErrInvalidArgument)
 		}
@@ -168,24 +174,26 @@ func New(cfg Config) (*App, error) {
 		recovery = q
 	}
 	rt, err := runtime.New(runtime.Dependencies{
-		Mode:                mode,
-		Registry:            reg,
-		Verifier:            verifier,
-		Boundary:            boundaryChecker,
-		Policy:              policyEngine,
-		Resources:           resourceChecker,
-		Fields:              fields,
-		Guardrails:          gr,
-		Risk:                risk.NewSimpleEngine(),
-		RiskBlock:           &risk.Blocker{MaxAllowed: core.RiskCritical},
-		Approval:            approvalEngine,
-		Quotas:              quotaLimiter,
-		Idempotency:         idempotencyStore,
-		IdempotencyRecovery: recovery,
-		Audit:               audit.NewLogger(sink),
-		Observer:            metrics,
-		Tenant:              cfg.TenantResolver,
-		AllowAnonymous:      cfg.AllowAnonymous,
+		Mode:                   mode,
+		Registry:               reg,
+		Verifier:               verifier,
+		Boundary:               boundaryChecker,
+		Policy:                 policyEngine,
+		Resources:              resourceChecker,
+		Fields:                 fields,
+		Guardrails:             gr,
+		Risk:                   risk.NewSimpleEngine(),
+		RiskBlock:              &risk.Blocker{MaxAllowed: core.RiskCritical},
+		Approval:               approvalEngine,
+		Quotas:                 quotaLimiter,
+		Idempotency:            idempotencyStore,
+		IdempotencyRecovery:    recovery,
+		ExecutionStatus:        executionStore,
+		Audit:                  audit.NewLogger(sink),
+		Observer:               metrics,
+		Tenant:                 cfg.TenantResolver,
+		AllowAnonymous:         cfg.AllowAnonymous,
+		DeferDurableValidation: production && !cfg.RequireDurableSecurityState,
 	})
 	if err != nil {
 		return nil, err
@@ -212,6 +220,7 @@ func New(cfg Config) (*App, error) {
 		TenantResolver:   cfg.TenantResolver,
 		QuotaLimiter:     quotaLimiter,
 		IdempotencyStore: idempotencyStore,
+		ExecutionStatus:  executionStore,
 		Metrics:          metrics,
 		client:           loom.NewClient(rt),
 	}
@@ -255,6 +264,12 @@ func (a *App) Call(ctx context.Context, req core.Request) core.Response {
 
 // Register adds a custom governed operation + handler.
 func (a *App) Register(op *core.Operation, h core.Handler) error {
+	if a == nil || a.Runtime == nil {
+		return fmt.Errorf("%w: app runtime is not configured", core.ErrInvalidArgument)
+	}
+	if err := a.Runtime.ValidateOperation(op); err != nil {
+		return err
+	}
 	return a.Registry.Register(op, h)
 }
 
@@ -331,6 +346,20 @@ func (a *App) AllowInputFields(id core.PrincipalID, b core.BoundaryID, op string
 
 // IssueApproval issues a single-use approval token (tests/admin tooling).
 func (a *App) IssueApproval(token string, principal core.PrincipalID, op string, boundary core.BoundaryID, maxRisk core.RiskLevel, ttl time.Duration) error {
+	return a.IssueApprovalVersioned(token, principal, op, core.DefaultOperationVersion, boundary, maxRisk, ttl)
+}
+
+// IssueApprovalVersioned binds an approval token to an exact operation version.
+func (a *App) IssueApprovalVersioned(token string, principal core.PrincipalID, op string, version string, boundary core.BoundaryID, maxRisk core.RiskLevel, ttl time.Duration) error {
+	if a == nil || a.ApprovalEngine == nil {
+		return fmt.Errorf("%w: approval issuer is not configured", core.ErrInvalidArgument)
+	}
+	if versioned, ok := a.ApprovalEngine.(approval.VersionedIssuer); ok {
+		return versioned.IssueVersioned(token, principal, op, version, boundary, maxRisk, ttl)
+	}
+	if core.NormalizeOperationVersion(version) != core.DefaultOperationVersion {
+		return fmt.Errorf("%w: approval issuer does not support operation versions", core.ErrInvalidArgument)
+	}
 	issuer, ok := a.ApprovalEngine.(approval.Issuer)
 	if !ok {
 		return fmt.Errorf("%w: approval issuer is not configured", core.ErrInvalidArgument)

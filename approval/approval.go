@@ -41,16 +41,23 @@ type Engine interface {
 	Consume(ctx context.Context, id core.Identity, op *core.Operation, boundary core.BoundaryID, token string) error
 }
 
+// VersionedIssuer issues an approval bound to an exact operation version.
+// Issuer remains available for compatibility and binds tokens to version 1.
+type VersionedIssuer interface {
+	IssueVersioned(token string, principal core.PrincipalID, op string, version string, boundary core.BoundaryID, maxRisk core.RiskLevel, ttl time.Duration) error
+}
+
 // Record is a stored pre-approval.
 type Record struct {
-	TokenHash string
-	Principal core.PrincipalID
-	Operation string
-	Boundary  core.BoundaryID
-	ExpiresAt time.Time
-	MaxRisk   core.RiskLevel
-	Consumed  bool
-	SingleUse bool
+	TokenHash        string
+	Principal        core.PrincipalID
+	Operation        string
+	OperationVersion string
+	Boundary         core.BoundaryID
+	ExpiresAt        time.Time
+	MaxRisk          core.RiskLevel
+	Consumed         bool
+	SingleUse        bool
 }
 
 // MemoryEngine stores issued approval tokens.
@@ -80,6 +87,11 @@ func hashTok(token string) string {
 
 // Issue registers an approval token. Returns error on bad input.
 func (e *MemoryEngine) Issue(token string, principal core.PrincipalID, op string, boundary core.BoundaryID, maxRisk core.RiskLevel, ttl time.Duration) error {
+	return e.IssueVersioned(token, principal, op, core.DefaultOperationVersion, boundary, maxRisk, ttl)
+}
+
+// IssueVersioned binds an approval token to one exact operation version.
+func (e *MemoryEngine) IssueVersioned(token string, principal core.PrincipalID, op string, version string, boundary core.BoundaryID, maxRisk core.RiskLevel, ttl time.Duration) error {
 	if e == nil {
 		return fmt.Errorf("%w: nil engine", core.ErrInvalidArgument)
 	}
@@ -100,13 +112,14 @@ func (e *MemoryEngine) Issue(token string, principal core.PrincipalID, op string
 		return fmt.Errorf("%w: approval token already issued", core.ErrAlreadyExists)
 	}
 	e.tokens[h] = &Record{
-		TokenHash: h,
-		Principal: principal,
-		Operation: op,
-		Boundary:  boundary,
-		ExpiresAt: time.Now().Add(ttl),
-		MaxRisk:   maxRisk,
-		SingleUse: true,
+		TokenHash:        h,
+		Principal:        principal,
+		Operation:        op,
+		OperationVersion: core.NormalizeOperationVersion(version),
+		Boundary:         boundary,
+		ExpiresAt:        time.Now().Add(ttl),
+		MaxRisk:          maxRisk,
+		SingleUse:        true,
 	}
 	return nil
 }
@@ -122,6 +135,9 @@ func checkRecord(rec *Record, id core.Identity, op *core.Operation, boundary cor
 	}
 	if rec.Principal != id.ID {
 		return "approval principal mismatch"
+	}
+	if core.NormalizeOperationVersion(rec.OperationVersion) != core.NormalizeOperationVersion(op.Version) {
+		return "approval operation version mismatch"
 	}
 	if rec.Operation != "*" && rec.Operation != op.Name {
 		return "approval operation mismatch"

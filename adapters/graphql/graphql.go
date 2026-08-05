@@ -64,14 +64,15 @@ func Schema(rt *runtime.Runtime) (graphql.Schema, error) {
 	executeInput := graphql.NewInputObject(graphql.InputObjectConfig{
 		Name: "ExecuteInput",
 		Fields: graphql.InputObjectConfigFieldMap{
-			"operation":       &graphql.InputObjectFieldConfig{Type: graphql.NewNonNull(graphql.String)},
-			"boundary":        &graphql.InputObjectFieldConfig{Type: graphql.NewNonNull(graphql.String)},
-			"input":           &graphql.InputObjectFieldConfig{Type: graphql.String, Description: "JSON object string"},
-			"resource":        &graphql.InputObjectFieldConfig{Type: resourceInput},
-			"fields":          &graphql.InputObjectFieldConfig{Type: graphql.NewList(graphql.String)},
-			"idempotencyKey":  &graphql.InputObjectFieldConfig{Type: graphql.String},
-			"approvalToken":   &graphql.InputObjectFieldConfig{Type: graphql.String},
-			"traceId":         &graphql.InputObjectFieldConfig{Type: graphql.String},
+			"operation":        &graphql.InputObjectFieldConfig{Type: graphql.NewNonNull(graphql.String)},
+			"operationVersion": &graphql.InputObjectFieldConfig{Type: graphql.String},
+			"boundary":         &graphql.InputObjectFieldConfig{Type: graphql.NewNonNull(graphql.String)},
+			"input":            &graphql.InputObjectFieldConfig{Type: graphql.String, Description: "JSON object string"},
+			"resource":         &graphql.InputObjectFieldConfig{Type: resourceInput},
+			"fields":           &graphql.InputObjectFieldConfig{Type: graphql.NewList(graphql.String)},
+			"idempotencyKey":   &graphql.InputObjectFieldConfig{Type: graphql.String},
+			"approvalToken":    &graphql.InputObjectFieldConfig{Type: graphql.String},
+			"traceId":          &graphql.InputObjectFieldConfig{Type: graphql.String},
 		},
 	})
 
@@ -89,14 +90,18 @@ func Schema(rt *runtime.Runtime) (graphql.Schema, error) {
 	resultType := graphql.NewObject(graphql.ObjectConfig{
 		Name: "ExecuteResult",
 		Fields: graphql.Fields{
-			"allowed":          &graphql.Field{Type: graphql.Boolean},
-			"decision":         &graphql.Field{Type: graphql.String},
-			"output":           &graphql.Field{Type: graphql.String, Description: "JSON object string"},
-			"denial":           &graphql.Field{Type: denialType},
-			"traceId":          &graphql.Field{Type: graphql.String},
-			"auditId":          &graphql.Field{Type: graphql.String},
-			"idempotentReplay": &graphql.Field{Type: graphql.Boolean},
-			"risk":             &graphql.Field{Type: graphql.String},
+			"allowed":            &graphql.Field{Type: graphql.Boolean},
+			"decision":           &graphql.Field{Type: graphql.String},
+			"output":             &graphql.Field{Type: graphql.String, Description: "JSON object string"},
+			"denial":             &graphql.Field{Type: denialType},
+			"traceId":            &graphql.Field{Type: graphql.String},
+			"auditId":            &graphql.Field{Type: graphql.String},
+			"idempotentReplay":   &graphql.Field{Type: graphql.Boolean},
+			"risk":               &graphql.Field{Type: graphql.String},
+			"outcome":            &graphql.Field{Type: graphql.String},
+			"executionId":        &graphql.Field{Type: graphql.String},
+			"operationVersion":   &graphql.Field{Type: graphql.String},
+			"reliabilityWarning": &graphql.Field{Type: graphql.String},
 		},
 	})
 
@@ -139,6 +144,10 @@ func resolveExecute(p graphql.ResolveParams, rt *runtime.Runtime) (any, error) {
 		return nil, fmt.Errorf("input required")
 	}
 	op, _ := raw["operation"].(string)
+	operationVersion, _ := raw["operationVersion"].(string)
+	if operationVersion == "" {
+		operationVersion, _ = raw["operation_version"].(string)
+	}
 	boundary, _ := raw["boundary"].(string)
 	if op == "" || boundary == "" {
 		return nil, fmt.Errorf("operation and boundary required")
@@ -161,15 +170,16 @@ func resolveExecute(p graphql.ResolveParams, rt *runtime.Runtime) (any, error) {
 	}
 
 	req := core.Request{
-		Operation:      op,
-		Boundary:       core.BoundaryID(boundary),
-		Input:          input,
-		Fields:         fields,
-		IdempotencyKey: strArg(raw, "idempotencyKey"),
-		ApprovalToken:  strArg(raw, "approvalToken"),
-		TraceID:        strArg(raw, "traceId"),
-		Credentials:    credentialsFrom(p.Context),
-		Metadata:       metadataFrom(p.Context),
+		Operation:        op,
+		OperationVersion: operationVersion,
+		Boundary:         core.BoundaryID(boundary),
+		Input:            input,
+		Fields:           fields,
+		IdempotencyKey:   strArg(raw, "idempotencyKey"),
+		ApprovalToken:    strArg(raw, "approvalToken"),
+		TraceID:          strArg(raw, "traceId"),
+		Credentials:      credentialsFrom(p.Context),
+		Metadata:         metadataFrom(p.Context),
 	}
 	if res, ok := raw["resource"].(map[string]any); ok {
 		req.Resource = &core.ResourceRef{
@@ -238,12 +248,16 @@ func bearer(h string) string {
 
 func resultMap(resp core.Response) map[string]any {
 	out := map[string]any{
-		"allowed":          resp.Allowed,
-		"decision":         resp.Decision.String(),
-		"traceId":          resp.TraceID,
-		"auditId":          resp.AuditID,
-		"idempotentReplay": resp.IdempotentReplay,
-		"risk":             resp.Risk.String(),
+		"allowed":            resp.Allowed,
+		"decision":           resp.Decision.String(),
+		"traceId":            resp.TraceID,
+		"auditId":            resp.AuditID,
+		"idempotentReplay":   resp.IdempotentReplay,
+		"risk":               resp.Risk.String(),
+		"outcome":            resp.Outcome.String(),
+		"executionId":        resp.ExecutionID,
+		"operationVersion":   resp.OperationVersion,
+		"reliabilityWarning": resp.ReliabilityWarning,
 	}
 	if resp.Output != nil {
 		b, err := json.Marshal(resp.Output)

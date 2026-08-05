@@ -2,56 +2,62 @@ package core
 
 import (
 	"fmt"
+	"sort"
 	"sync"
 )
 
 // Handler executes business logic after the full enforcement pipeline has passed.
-// Handlers must assume input is schema-validated but still treat data as hostile.
 type Handler func(ec *ExecutionContext) (*Result, error)
 
-// Registry maps operation names to definitions and handlers.
-// Unknown operations are denied. Registration is explicit.
+// Registry maps operation names and exact versions to definitions and handlers.
+// Unknown operations or versions are denied. Registration is explicit.
 type Registry struct {
 	mu       sync.RWMutex
-	ops      map[string]*Operation
-	handlers map[string]Handler
+	ops      map[string]map[string]*Operation
+	handlers map[string]map[string]Handler
 }
 
 // NewRegistry returns an empty registry (deny everything until registered).
 func NewRegistry() *Registry {
 	return &Registry{
-		ops:      make(map[string]*Operation),
-		handlers: make(map[string]Handler),
+		ops:      make(map[string]map[string]*Operation),
+		handlers: make(map[string]map[string]Handler),
 	}
 }
 
-// Register adds an operation and its handler.
-// Overwriting an existing name returns ErrAlreadyExists (fail closed on ambiguity).
+// Register adds an operation and its handler. The same name may have multiple
+// exact versions, but registering one version twice is always an error.
 func (r *Registry) Register(op *Operation, h Handler) error {
 	if r == nil {
 		return fmt.Errorf("%w: nil registry", ErrInvalidArgument)
 	}
-	if op == nil || op.Name == "" {
+	if op == nil {
+		return fmt.Errorf("%w: nil operation", ErrInvalidArgument)
+	}
+	if op.Name == "" {
 		return fmt.Errorf("%w: operation name required", ErrInvalidArgument)
 	}
 	if h == nil {
 		return fmt.Errorf("%w: handler required", ErrInvalidArgument)
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if _, exists := r.ops[op.Name]; exists {
-		return fmt.Errorf("%w: operation %q", ErrAlreadyExists, op.Name)
-	}
-	// Copy to prevent external mutation after register.
 	registered := copyOperation(op)
 	registered.Version = NormalizeOperationVersion(registered.Version)
-	r.ops[op.Name] = registered
-	r.handlers[op.Name] = h
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.ops[registered.Name] == nil {
+		r.ops[registered.Name] = make(map[string]*Operation)
+		r.handlers[registered.Name] = make(map[string]Handler)
+	}
+	if _, exists := r.ops[registered.Name][registered.Version]; exists {
+		return fmt.Errorf("%w: operation %q version %q", ErrAlreadyExists, registered.Name, registered.Version)
+	}
+	r.ops[registered.Name][registered.Version] = registered
+	r.handlers[registered.Name][registered.Version] = h
 	return nil
 }
 
-// copyOperation deep-copies an Operation so callers can never alias (and
-// mutate) the registry's internal definition.
+// copyOperation deep-copies an Operation so callers cannot alias and mutate
+// the registry's internal definition.
 func copyOperation(op *Operation) *Operation {
 	cp := *op
 	if op.Permissions != nil {
@@ -62,6 +68,9 @@ func copyOperation(op *Operation) *Operation {
 	}
 	if op.Effects != nil {
 		cp.Effects = append([]Effect(nil), op.Effects...)
+	}
+	if op.AllowedCurrencies != nil {
+		cp.AllowedCurrencies = append([]string(nil), op.AllowedCurrencies...)
 	}
 	if op.SensitiveFields != nil {
 		cp.SensitiveFields = append([]string(nil), op.SensitiveFields...)
@@ -85,59 +94,67 @@ func (r *Registry) MustRegister(op *Operation, h Handler) {
 	}
 }
 
-// Get returns a deep copy of the operation definition or ErrNotFound.
-// The copy is deliberate: a holder must not be able to mutate permissions /
-// risk / approval policy concurrently with Execute reading them.
+// Get returns the default version of an operation or ErrNotFound.
 func (r *Registry) Get(name string) (*Operation, error) {
+	return r.GetVersion(name, DefaultOperationVersion)
+}
+
+// GetVersion returns an operation only when the requested contract version
+// matches exactly. Empty version means DefaultOperationVersion. No fallback to
+// another version is performed.
+func (r *Registry) GetVersion(name, version string) (*Operation, error) {
 	if r == nil {
 		return nil, ErrNotFound
 	}
+	version = NormalizeOperationVersion(version)
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	op, ok := r.ops[name]
+	versions, ok := r.ops[name]
 	if !ok {
-		return nil, fmt.Errorf("%w: operation %q", ErrNotFound, name)
+		return nil, ErrNotFound
+	}
+	op, ok := versions[version]
+	if !ok {
+		return nil, fmt.Errorf("%w: operation %q version %q", ErrNotFound, name, version)
 	}
 	return copyOperation(op), nil
 }
 
-// GetVersion returns an operation only when the requested contract version
-// matches exactly. Empty version means DefaultOperationVersion.
-func (r *Registry) GetVersion(name, version string) (*Operation, error) {
-	op, err := r.Get(name)
-	if err != nil {
-		return nil, err
-	}
-	if NormalizeOperationVersion(version) != NormalizeOperationVersion(op.Version) {
-		return nil, fmt.Errorf("%w: operation %q version %q", ErrNotFound, name, version)
-	}
-	return op, nil
+// Handler returns the default-version handler or ErrNotFound.
+func (r *Registry) Handler(name string) (Handler, error) {
+	return r.HandlerVersion(name, DefaultOperationVersion)
 }
 
-// Handler returns the handler or ErrNotFound.
-func (r *Registry) Handler(name string) (Handler, error) {
+// HandlerVersion returns only the handler bound to the exact version.
+func (r *Registry) HandlerVersion(name, version string) (Handler, error) {
 	if r == nil {
 		return nil, ErrNotFound
 	}
+	version = NormalizeOperationVersion(version)
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	h, ok := r.handlers[name]
+	versions, ok := r.handlers[name]
 	if !ok {
 		return nil, fmt.Errorf("%w: handler %q", ErrNotFound, name)
+	}
+	h, ok := versions[version]
+	if !ok {
+		return nil, fmt.Errorf("%w: handler %q version %q", ErrNotFound, name, version)
 	}
 	return h, nil
 }
 
-// Names returns registered operation names (snapshot).
+// Names returns registered operation names, without duplicate version entries.
 func (r *Registry) Names() []string {
 	if r == nil {
 		return nil
 	}
 	r.mu.RLock()
-	defer r.mu.RUnlock()
 	out := make([]string, 0, len(r.ops))
-	for n := range r.ops {
-		out = append(out, n)
+	for name := range r.ops {
+		out = append(out, name)
 	}
+	r.mu.RUnlock()
+	sort.Strings(out)
 	return out
 }
