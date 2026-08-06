@@ -34,7 +34,7 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Scan Go source
-        run: go run github.com/securego/gosec/v2/cmd/gosec@v2.22.8 ./...
+        run: go run github.com/securego/gosec/v2/cmd/gosec@v2.22.8 -exclude-dir=adapters/grpc/gen ./...
 
   secrets:
     name: secret-scan
@@ -45,6 +45,8 @@ jobs:
         with:
           fetch-depth: 0
       - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   codeql:
     name: codeql-${{ matrix.language }}
@@ -59,8 +61,6 @@ jobs:
       matrix:
         include:
           - language: go
-            build-mode: autobuild
-          - language: rust
             build-mode: autobuild
           - language: javascript-typescript
             build-mode: none

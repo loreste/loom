@@ -185,6 +185,7 @@ func parseMoneyString(value, currency string) (Money, error) {
 			return Money{}, fmt.Errorf("invalid fractional amount")
 		}
 	}
+	// #nosec G115 -- ParseInt used a 32-bit bound for the fractional part.
 	m := Money{Units: int64(whole), Nanos: int32(nanos), Currency: strings.ToUpper(strings.TrimSpace(currency))}
 	if !m.Valid() {
 		return Money{}, fmt.Errorf("invalid currency")

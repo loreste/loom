@@ -291,6 +291,7 @@ func NewPlatform(cfg Config) (*Platform, error) {
 			_ = closeAll(db, rdb)
 			return nil, err
 		}
+		// #nosec G304 -- auditPath is explicit application configuration.
 		f, err := os.OpenFile(auditPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 		if err != nil {
 			_ = closeAll(db, rdb)
