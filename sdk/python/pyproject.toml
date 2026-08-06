@@ -12,7 +12,7 @@ Repository = "https://github.com/loreste/loom"
 [project.optional-dependencies]
 dev = [
     "build>=1.2",
-    "mypy>=1.11",
+    "mypy>=2.3.0",
 ]
 
 [build-system]
