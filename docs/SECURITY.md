@@ -88,6 +88,13 @@ timeouts, connection limits, network egress controls, and an operational audit
 sink. File-backed state is durable for a single node; it is not a distributed
 approval or idempotency store.
 
+PostgreSQL-backed execution status is the shared option for multiple replicas.
+File-backed execution, approval, and idempotency state is durable for a single
+node; it is not a distributed store.
+
+The repository security workflow runs govulncheck, gosec, CodeQL, dependency
+review, secret scanning, container scanning, and SBOM generation.
+
 ## Verification
 
 Run:
@@ -98,6 +105,6 @@ go test -race ./...
 go test -fuzz=FuzzExecute -fuzztime=15s ./runtime/
 ```
 
-The CI workflow also runs SDK tests and cross-SDK contract tests. Dependency
-and static security scanners should be installed in CI where the runner
-environment permits them.
+The CI workflow also runs SDK tests and cross-SDK contract tests. The security
+workflow runs govulncheck, gosec, CodeQL, dependency review, secret scanning,
+container scanning, and SBOM generation.

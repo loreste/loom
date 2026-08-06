@@ -13,6 +13,7 @@ import (
 const (
 	FileApprovals   = "approvals.json"
 	FileIdempotency = "idempotency.json"
+	FileExecution   = "executions.json"
 	FileAuditJSONL  = "audit.jsonl"
 	DirTLS          = "tls"
 )

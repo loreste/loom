@@ -18,7 +18,7 @@ examples below assume `LOOM_TOKEN` and a running server.
 ## Go
 
 ```bash
-go get github.com/loreste/loom@v0.1.4
+go get github.com/loreste/loom@v0.1.5
 ```
 
 ```go
@@ -59,7 +59,7 @@ response, err := client.Invoke(ctx, loomweft.StepCall{
 ## Python
 
 ```bash
-python -m pip install loom-sdk==0.1.4
+python -m pip install loom-sdk==0.1.5
 ```
 
 ```python
@@ -82,7 +82,7 @@ The package requires Node 18 or newer. Browser-compatible callers import
 point.
 
 ```bash
-npm install @loreste/loom-sdk@0.1.4
+npm install @loreste/loom-sdk@0.1.5
 ```
 
 ```ts
@@ -102,7 +102,7 @@ provided for tests or older runtimes.
 
 ```toml
 [dependencies]
-loom-sdk = "0.1.4"
+loom-sdk = "0.1.5"
 ```
 
 ```rust

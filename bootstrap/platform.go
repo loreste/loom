@@ -23,6 +23,7 @@ import (
 	"github.com/loreste/loom/domains/deployment"
 	"github.com/loreste/loom/domains/document"
 	"github.com/loreste/loom/domains/payment"
+	"github.com/loreste/loom/execution"
 	"github.com/loreste/loom/guardrails"
 	"github.com/loreste/loom/idempotency"
 	"github.com/loreste/loom/identity"
@@ -182,17 +183,18 @@ func NewPlatform(cfg Config) (*Platform, error) {
 	memSink := &audit.MemorySink{}
 
 	var (
-		apr       approval.Store
-		idem      idempotency.Store
-		auditPath = cfg.AuditJSONL
-		db        *sql.DB
-		rdb       *redis.Client
-		readyFns  []func(context.Context) error
-		extraSink audit.Sink
-		limiter   quotas.Limiter
-		policySrc policy.Source
-		pgBundle  *postgres.Bundle
-		auditFile *os.File
+		apr            approval.Store
+		idem           idempotency.Store
+		executionStore execution.Store
+		auditPath      = cfg.AuditJSONL
+		db             *sql.DB
+		rdb            *redis.Client
+		readyFns       []func(context.Context) error
+		extraSink      audit.Sink
+		limiter        quotas.Limiter
+		policySrc      policy.Source
+		pgBundle       *postgres.Bundle
+		auditFile      *os.File
 	)
 
 	// Quotas: Redis when configured, else memory. Shared Config for limits.
@@ -232,6 +234,7 @@ func NewPlatform(cfg Config) (*Platform, error) {
 		db = bundle.DB
 		apr = bundle.Approvals
 		idem = bundle.Idempotency
+		executionStore = bundle.ExecutionStatus
 		extraSink = bundle.Audit
 		policySrc = bundle.Policy
 		readyFns = append(readyFns, func(ctx context.Context) error {
@@ -260,16 +263,26 @@ func NewPlatform(cfg Config) (*Platform, error) {
 			return nil, fmt.Errorf("idempotency store: %w", err)
 		}
 		idem = fs
+		executionStore, err = execution.NewFileStore(persist.Path(cfg.DataDir, persist.FileExecution))
+		if err != nil {
+			if rdb != nil {
+				_ = rdb.Close()
+			}
+			return nil, fmt.Errorf("execution store: %w", err)
+		}
 		if auditPath == "" {
 			auditPath = persist.Path(cfg.DataDir, persist.FileAuditJSONL)
 		}
 	} else {
 		apr = approval.NewMemoryEngine()
 		idem = idempotency.NewMemoryStore()
+		executionStore = execution.NewMemoryStore()
 	}
 
 	var sinks []audit.Sink
-	sinks = append(sinks, memSink)
+	if !cfg.RequireDurable {
+		sinks = append(sinks, memSink)
+	}
 	if extraSink != nil {
 		sinks = append(sinks, extraSink)
 	}
@@ -296,24 +309,37 @@ func NewPlatform(cfg Config) (*Platform, error) {
 	gr := guardrails.DefaultChain()
 	gr.Add(&guardrails.FinancialGuard{MaxAmount: core.Money{Units: 10_000, Currency: "USD"}})
 	metrics := runtime.NewMetrics()
+	mode := runtime.ModeDevelopment
+	if cfg.RequireDurable {
+		mode = runtime.ModeProduction
+	}
+	var recovery idempotency.RecoveryQueue
+	if q, ok := executionStore.(idempotency.RecoveryQueue); ok {
+		recovery = q
+	} else if q, ok := idem.(idempotency.RecoveryQueue); ok {
+		recovery = q
+	}
 
 	rt, err := runtime.New(runtime.Dependencies{
-		Registry:    reg,
-		Verifier:    multi,
-		Delegation:  del,
-		Boundary:    bnd,
-		Policy:      pol,
-		Resources:   res,
-		Fields:      fields,
-		Guardrails:  gr,
-		Risk:        risk.NewSimpleEngine(),
-		RiskBlock:   &risk.Blocker{MaxAllowed: core.RiskCritical},
-		Approval:    apr,
-		Quotas:      limiter,
-		Idempotency: idem,
-		Audit:       auditLogger,
-		Observer:    metrics,
-		Tenant:      cfg.TenantResolver,
+		Mode:                mode,
+		Registry:            reg,
+		Verifier:            multi,
+		Delegation:          del,
+		Boundary:            bnd,
+		Policy:              pol,
+		Resources:           res,
+		Fields:              fields,
+		Guardrails:          gr,
+		Risk:                risk.NewSimpleEngine(),
+		RiskBlock:           &risk.Blocker{MaxAllowed: core.RiskCritical},
+		Approval:            apr,
+		Quotas:              limiter,
+		Idempotency:         idem,
+		ExecutionStatus:     executionStore,
+		IdempotencyRecovery: recovery,
+		Audit:               auditLogger,
+		Observer:            metrics,
+		Tenant:              cfg.TenantResolver,
 	})
 	if err != nil {
 		if auditFile != nil {

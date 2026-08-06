@@ -153,6 +153,7 @@ func New(cfg Config) (*App, error) {
 			"approval":    approvalEngine,
 			"quotas":      quotaLimiter,
 			"idempotency": idempotencyStore,
+			"execution":   executionStore,
 			"audit":       sink,
 		} {
 			durable, ok := dep.(interface{ Durable() bool })
@@ -170,7 +171,9 @@ func New(cfg Config) (*App, error) {
 		mode = runtime.ModeProduction
 	}
 	var recovery idempotency.RecoveryQueue
-	if q, ok := idempotencyStore.(idempotency.RecoveryQueue); ok {
+	if q, ok := executionStore.(idempotency.RecoveryQueue); ok {
+		recovery = q
+	} else if q, ok := idempotencyStore.(idempotency.RecoveryQueue); ok {
 		recovery = q
 	}
 	rt, err := runtime.New(runtime.Dependencies{

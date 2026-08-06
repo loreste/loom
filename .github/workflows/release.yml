@@ -46,8 +46,27 @@ jobs:
           name: loom-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/loom-*
 
-  publish:
+  sbom:
+    name: release-sbom
     needs: binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare SBOM output
+        run: mkdir -p dist
+      - uses: anchore/sbom-action@v0.20.5
+        with:
+          path: .
+          format: cyclonedx-json
+          output-file: dist/loom-${{ github.ref_name }}-sbom.cdx.json
+          upload-artifact: false
+      - uses: actions/upload-artifact@v4
+        with:
+          name: loom-release-sbom
+          path: dist/loom-${{ github.ref_name }}-sbom.cdx.json
+
+  publish:
+    needs: [binaries, sbom]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4

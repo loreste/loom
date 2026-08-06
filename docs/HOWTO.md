@@ -141,6 +141,38 @@ single-use approval immediately before the handler, and audits the result. A
 failed handler burns the approval token by design. Clients must reuse the same
 idempotency key for a safe retry.
 
+## Configure durable execution status
+
+Side-effecting operations in production need an `execution.Store` that survives
+restart. PostgreSQL is the shared option for multiple replicas:
+
+```go
+bundle, err := postgres.NewBundle(ctx, os.Getenv("LOOM_DATABASE_URL"))
+if err != nil {
+    return err
+}
+defer bundle.Close()
+
+a, err := app.New(app.Config{
+    Environment:     "production",
+    ApprovalEngine:   bundle.Approvals,
+    IdempotencyStore: bundle.Idempotency,
+    ExecutionStore:   bundle.ExecutionStatus,
+    AuditSink:        bundle.Audit,
+})
+```
+
+For a single node, `DataDir` bootstrap creates `executions.json` alongside
+approval and idempotency state. It is not a multi-node store. Applications
+that provide their own store should preserve the same guarantees: atomic
+insert/update, one-way reconciliation, deep-copy boundaries, and durable
+recovery queue state.
+
+When idempotency completion needs asynchronous recovery, workers claim a
+short-lived PostgreSQL recovery lease, complete the recording, and release the
+lease. A worker must not rerun the business handler for this task. Use the
+execution ID to reconcile the external side effect separately.
+
 ## Run background jobs safely
 
 Use `job.Runner` with an `app.App` or runtime caller. Every queued job becomes

@@ -113,6 +113,9 @@ func New(deps Dependencies) (*Runtime, error) {
 		if deps.Idempotency == nil || !durable(deps.Idempotency) {
 			return nil, fmt.Errorf("%w: production requires durable idempotency state", core.ErrInvalidArgument)
 		}
+		if deps.ExecutionStatus == nil || !durable(deps.ExecutionStatus) {
+			return nil, fmt.Errorf("%w: production requires durable execution status", core.ErrInvalidArgument)
+		}
 		if deps.Audit == nil || deps.Audit.Sink == nil || !durable(deps.Audit.Sink) {
 			return nil, fmt.Errorf("%w: production requires durable audit state", core.ErrInvalidArgument)
 		}

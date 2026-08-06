@@ -37,7 +37,7 @@ func (s *MemoryStore) Put(ctx context.Context, record Record) error {
 		record.StartedAt = time.Now().UTC()
 	}
 	record.UpdatedAt = time.Now().UTC()
-	s.records[record.ExecutionID] = record
+	s.records[record.ExecutionID] = cloneRecord(record)
 	return nil
 }
 
@@ -51,7 +51,7 @@ func (s *MemoryStore) Get(ctx context.Context, id string) (Record, bool, error) 
 	s.mu.RLock()
 	record, ok := s.records[id]
 	s.mu.RUnlock()
-	return record, ok, nil
+	return cloneRecord(record), ok, nil
 }
 
 func (s *MemoryStore) Reconcile(ctx context.Context, id string, outcome core.Outcome, note string) (Record, error) {
@@ -67,18 +67,14 @@ func (s *MemoryStore) Reconcile(ctx context.Context, id string, outcome core.Out
 	if !ok {
 		return Record{}, fmt.Errorf("execution: %s not found", id)
 	}
-	if record.State != StateExecutedUnconfirmed && record.State != StateReconciled {
-		return Record{}, fmt.Errorf("execution: %s is not awaiting reconciliation", id)
+	updated, err := reconcileRecord(record, outcome, note)
+	if err != nil {
+		return Record{}, err
 	}
-	record.Outcome = outcome
-	record.State = StateReconciled
-	record.Response.Outcome = outcome
-	record.Response.Allowed = outcome == core.OutcomeAllowed
-	record.Response.ReliabilityWarning = ""
-	record.ReconciliationNote = note
-	record.UpdatedAt = time.Now().UTC()
-	s.records[id] = record
-	return record, nil
+	if record.State != StateReconciled {
+		s.records[id] = cloneRecord(updated)
+	}
+	return cloneRecord(updated), nil
 }
 
 func (s *MemoryStore) MarkRecoveryQueued(ctx context.Context, id string) (Record, error) {
@@ -93,6 +89,6 @@ func (s *MemoryStore) MarkRecoveryQueued(ctx context.Context, id string) (Record
 	}
 	record.RecoveryQueued = true
 	record.UpdatedAt = time.Now().UTC()
-	s.records[id] = record
-	return record, nil
+	s.records[id] = cloneRecord(record)
+	return cloneRecord(record), nil
 }

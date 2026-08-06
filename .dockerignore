@@ -1,0 +1,13 @@
+.git
+.github
+.loom-data
+.tokensave
+worker.db
+dist
+sdk/python/dist
+sdk/python/.venv
+sdk/typescript/node_modules
+sdk/typescript/dist
+sdk/rust/target
+*.log
+*.tmp

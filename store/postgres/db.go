@@ -1,4 +1,5 @@
-// Package postgres provides durable backends for approval, idempotency, and audit.
+// Package postgres provides durable backends for approval, idempotency,
+// execution status, recovery coordination, policy, and audit.
 // Fail-closed: connection/query errors surface to the runtime as denials where applicable.
 package postgres
 
@@ -74,11 +75,12 @@ func Ready(ctx context.Context, db *sql.DB) error {
 
 // Bundle groups durable stores sharing one pool.
 type Bundle struct {
-	DB          *sql.DB
-	Approvals   *ApprovalStore
-	Idempotency *IdempotencyStore
-	Audit       *AuditSink
-	Policy      *PolicySource
+	DB              *sql.DB
+	Approvals       *ApprovalStore
+	Idempotency     *IdempotencyStore
+	ExecutionStatus *ExecutionStore
+	Audit           *AuditSink
+	Policy          *PolicySource
 }
 
 // NewBundle opens, migrates, and returns stores.
@@ -97,11 +99,12 @@ func NewBundlePool(ctx context.Context, dsn string, pool PoolConfig) (*Bundle, e
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
 	return &Bundle{
-		DB:          db,
-		Approvals:   NewApprovalStore(db),
-		Idempotency: NewIdempotencyStore(db),
-		Audit:       NewAuditSink(db),
-		Policy:      NewPolicySource(db),
+		DB:              db,
+		Approvals:       NewApprovalStore(db),
+		Idempotency:     NewIdempotencyStore(db),
+		ExecutionStatus: NewExecutionStore(db),
+		Audit:           NewAuditSink(db),
+		Policy:          NewPolicySource(db),
 	}, nil
 }
 

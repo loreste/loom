@@ -75,7 +75,7 @@ allow.
 
 ## Status
 
-The current public release is `v0.1.4`. It is an early open-source release.
+The current public release is `v0.1.5`. It is an early open-source release.
 The runtime has been exercised internally and includes tests across its main
 packages. Production integrations, packaging, and documentation will continue
 to evolve with use.
@@ -105,7 +105,7 @@ go test -race ./...
 To add Loom to a Go application, use the tagged module release:
 
 ```bash
-go get github.com/loreste/loom@v0.1.4
+go get github.com/loreste/loom@v0.1.5
 ```
 
 Then register operations and call them through the application API:
