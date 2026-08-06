@@ -35,6 +35,10 @@ Do not use a file store as a multi-node lock or coordination mechanism. Do not
 assume a process-local quota, idempotency key, approval, or execution record
 survives failover.
 
+Start at least one configured [`recovery` worker](RECOVERY.md) for each shared
+execution store. Alert when the queue is not draining, when the oldest item
+exceeds its recovery objective, or when verification repeatedly escalates.
+
 ## Startup and readiness
 
 Use `/healthz` for process health and `/readyz` for dependency readiness. A
@@ -58,7 +62,9 @@ Every side-effecting operation should use idempotency. If Loom returns
 
 `retry_recording` is safe for durable recording recovery but never reruns the
 handler. Recovery workers claim leases so two workers do not complete the same
-record concurrently.
+record concurrently. Configure the official worker with an authoritative
+provider verifier and an escalation destination. A worker must never call the
+original handler.
 
 ## Observability
 
@@ -111,6 +117,13 @@ For each production deployment, document the audit sink, backup/export path, ret
 At minimum, alert on audit-write failures, no successful audit events within the expected interval, growing `executed_unconfirmed` age, recovery queue failures, and reconciliation conflicts. Treat an audit delivery failure after a handler side effect as an uncertain outcome and reconcile before allowing automated retries.
 
 For JSONL deployments, ship the file as structured JSON without rewriting fields, rotate it without truncating unexported records, and preserve `schema_version`. For PostgreSQL deployments, restrict direct writes, grant readers only the columns and rows they need, back up `loom_audit`, and export terminal history before retention cleanup.
+
+When tamper evidence is required, wrap the audit sink with
+`audit.NewHashChainSink`, periodically create signed checkpoints, and export
+both events and checkpoints to an immutable destination. Verify the chain
+before investigations, retention exports, and compliance reports. Keep the
+checkpoint signing key outside Loom and rotate it under the organization's key
+management policy.
 
 ## Incident response
 

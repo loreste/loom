@@ -79,7 +79,7 @@ class Client:
     base_url: str
     token: str = ""
     timeout: float = 30.0
-    user_agent: str = "loom-python-sdk/0.1.6"
+	user_agent: str = "loom-python-sdk/0.1.7"
 
     def call(
         self,

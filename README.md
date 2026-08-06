@@ -175,6 +175,12 @@ Read:
 - [SCHEMA.md](docs/SCHEMA.md) for the bounded Loom Schema; and
 - [SDK.md](docs/SDK.md) for Go, Weft, Python, Node.js/TypeScript, and Rust usage.
 
+Additional operational guides:
+
+- [RECOVERY.md](docs/RECOVERY.md) recovery worker and reconciliation;
+- [PERFORMANCE.md](docs/PERFORMANCE.md) benchmark result and measurement guidance;
+- [FAILURE-INJECTION.md](docs/FAILURE-INJECTION.md) failure scenarios and release evidence.
+
 ## Repository layout
 
 | Area | Purpose |

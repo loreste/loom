@@ -53,7 +53,8 @@ func (s *AuditSink) Write(ctx context.Context, ev audit.Event) error {
 			output_digest, output_field_count, requested_field_count, metadata,
 			duration_ms, auth_method, idempotency_key_digest, idempotency_state,
 			approval_state, quota_state, reliability_warning, adapter, prior_audit_id,
-			execution_state, execution_revision, recovery_queued, reconciliation_note
+			execution_state, execution_revision, recovery_queued, reconciliation_note,
+			prev_event_hash, event_hash
 		) VALUES (
 			$1,$2,$3,$4,$5,$6,
 			$7,$8,$9,$10,$11,$12,
@@ -62,7 +63,7 @@ func (s *AuditSink) Write(ctx context.Context, ev audit.Event) error {
 			$23,$24,$25,$26,$27,$28,
 			$29,$30,$31,$32,$33,$34,
 			$35,$36,$37,$38,$39,$40,$41,
-			$42,$43,$44,$45
+			$42,$43,$44,$45,$46,$47
 		)
 		ON CONFLICT (id) DO NOTHING
 	`,
@@ -75,6 +76,7 @@ func (s *AuditSink) Write(ctx context.Context, ev audit.Event) error {
 		ev.AuthMethod, ev.IdempotencyKeyDigest, ev.IdempotencyState, ev.ApprovalState,
 		ev.QuotaState, ev.ReliabilityWarning, ev.Adapter, ev.PriorAuditID,
 		ev.ExecutionState, ev.ExecutionRevision, ev.RecoveryQueued, ev.ReconciliationNote,
+		ev.PrevEventHash, ev.EventHash,
 	)
 	return err
 }

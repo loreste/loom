@@ -89,14 +89,37 @@ func (s *FileStore) Put(ctx context.Context, record Record) error {
 		record.StartedAt = time.Now().UTC()
 	}
 	record.UpdatedAt = time.Now().UTC()
-	previous, existed := s.records[record.ExecutionID]
+	if _, existed := s.records[record.ExecutionID]; existed {
+		return fmt.Errorf("%w: execution %s already exists", core.ErrAlreadyExists, record.ExecutionID)
+	}
 	s.records[record.ExecutionID] = cloneRecord(record)
 	if err := s.persistLocked(); err != nil {
-		if existed {
-			s.records[record.ExecutionID] = previous
-		} else {
-			delete(s.records, record.ExecutionID)
-		}
+		delete(s.records, record.ExecutionID)
+		return err
+	}
+	return nil
+}
+
+func (s *FileStore) Complete(ctx context.Context, updated Record) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s == nil {
+		return fmt.Errorf("execution: nil file store")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	previous, ok := s.records[updated.ExecutionID]
+	if !ok {
+		return fmt.Errorf("%w: execution %s", core.ErrNotFound, updated.ExecutionID)
+	}
+	completed, err := CompleteRecord(previous, updated)
+	if err != nil {
+		return err
+	}
+	s.records[updated.ExecutionID] = completed
+	if err := s.persistLocked(); err != nil {
+		s.records[updated.ExecutionID] = previous
 		return err
 	}
 	return nil

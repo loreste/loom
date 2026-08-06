@@ -125,9 +125,12 @@ ALTER TABLE loom_audit ADD COLUMN IF NOT EXISTS quota_state TEXT NOT NULL DEFAUL
 ALTER TABLE loom_audit ADD COLUMN IF NOT EXISTS reliability_warning TEXT NOT NULL DEFAULT '';
 ALTER TABLE loom_audit ADD COLUMN IF NOT EXISTS adapter TEXT NOT NULL DEFAULT '';
 ALTER TABLE loom_audit ADD COLUMN IF NOT EXISTS prior_audit_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE loom_audit ADD COLUMN IF NOT EXISTS prev_event_hash TEXT NOT NULL DEFAULT '';
+ALTER TABLE loom_audit ADD COLUMN IF NOT EXISTS event_hash TEXT NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS idx_loom_audit_execution ON loom_audit (execution_id);
 CREATE INDEX IF NOT EXISTS idx_loom_audit_operation ON loom_audit (operation, operation_version);
 CREATE INDEX IF NOT EXISTS idx_loom_audit_decision_reason ON loom_audit (decision, reason);
+CREATE INDEX IF NOT EXISTS idx_loom_audit_event_hash ON loom_audit (event_hash);
 
 -- Distributed policy documents (replace semantics by version).
 CREATE TABLE IF NOT EXISTS loom_policy (

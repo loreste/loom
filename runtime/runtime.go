@@ -340,7 +340,7 @@ func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Res
 			executionRecord.Outcome = resp.Outcome
 			executionRecord.State = execution.StateFor(resp)
 			executionRecord.UpdatedAt = rt.deps.Clock()
-			if err := rt.deps.ExecutionStatus.Put(context.Background(), executionRecord); err != nil {
+			if err := rt.deps.ExecutionStatus.Complete(context.Background(), executionRecord); err != nil {
 				log.Printf("loom: execution status update failed for %s: %v", executionID, err)
 			}
 		}

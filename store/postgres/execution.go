@@ -95,9 +95,8 @@ func validateExecutionRecord(record execution.Record) error {
 	return nil
 }
 
-// Put inserts or replaces a record atomically. Replacing a record increments
-// its revision and clears any old recovery lease; queue state comes from the
-// supplied record.
+// Put inserts one immutable execution record. An execution ID collision is an
+// error; callers must use Complete or Reconcile for explicit transitions.
 func (s *ExecutionStore) Put(ctx context.Context, record execution.Record) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("%w: nil execution store", core.ErrInvalidArgument)
@@ -116,34 +115,77 @@ func (s *ExecutionStore) Put(ctx context.Context, record execution.Record) error
 	if err != nil {
 		return fmt.Errorf("postgres execution: marshal response: %w", err)
 	}
-	_, err = s.db.ExecContext(ctx, `
-        INSERT INTO loom_executions (`+executionColumns+`)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,1,NULL,NULL,NULL)
-        ON CONFLICT (execution_id) DO UPDATE SET
-            operation = EXCLUDED.operation,
-            operation_version = EXCLUDED.operation_version,
-            principal = EXCLUDED.principal,
-            boundary = EXCLUDED.boundary,
-            outcome = EXCLUDED.outcome,
-            state = EXCLUDED.state,
-            response = EXCLUDED.response,
-            idempotency_key = EXCLUDED.idempotency_key,
-            fingerprint = EXCLUDED.fingerprint,
-            recovery_queued = EXCLUDED.recovery_queued,
-            reconciliation_note = EXCLUDED.reconciliation_note,
-            started_at = EXCLUDED.started_at,
-            updated_at = EXCLUDED.updated_at,
-            revision = loom_executions.revision + 1,
-            recovery_lease_id = NULL,
-            recovery_lease_owner = NULL,
-            recovery_lease_until = NULL
-    `,
+	result, err := s.db.ExecContext(ctx, `
+		INSERT INTO loom_executions (`+executionColumns+`)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,1,NULL,NULL,NULL)
+		ON CONFLICT (execution_id) DO NOTHING
+	`,
 		record.ExecutionID, record.Operation, record.OperationVersion, record.Principal,
 		record.Boundary, record.Outcome, record.State, responseRaw, record.IdempotencyKey,
 		record.Fingerprint, record.RecoveryQueued, record.ReconciliationNote,
 		record.StartedAt.UTC(), record.UpdatedAt.UTC(),
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	if changed, _ := result.RowsAffected(); changed != 1 {
+		return fmt.Errorf("%w: execution %s already exists", core.ErrAlreadyExists, record.ExecutionID)
+	}
+	return nil
+}
+
+// Complete performs the explicit pending-to-terminal transition. It never
+// replaces immutable execution identity fields and cannot alter reconciled
+// history.
+func (s *ExecutionStore) Complete(ctx context.Context, updated execution.Record) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("%w: nil execution store", core.ErrInvalidArgument)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := validateExecutionRecord(updated); err != nil {
+		return err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	row := tx.QueryRowContext(ctx, `SELECT `+executionColumns+` FROM loom_executions WHERE execution_id = $1 FOR UPDATE`, updated.ExecutionID)
+	previous, _, _, _, err := scanExecutionRecord(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("%w: execution %s", core.ErrNotFound, updated.ExecutionID)
+	}
+	if err != nil {
+		return err
+	}
+	completed, err := execution.CompleteRecord(previous, updated)
+	if err != nil {
+		return err
+	}
+	responseRaw, err := json.Marshal(completed.Response)
+	if err != nil {
+		return fmt.Errorf("postgres execution: marshal response: %w", err)
+	}
+	result, err := tx.ExecContext(ctx, `
+		UPDATE loom_executions
+		SET outcome = $2, state = $3, response = $4, updated_at = $5,
+			revision = revision + 1
+		WHERE execution_id = $1 AND state = $6
+	`, completed.ExecutionID, completed.Outcome, completed.State, responseRaw,
+		completed.UpdatedAt.UTC(), execution.StatePending)
+	if err != nil {
+		return err
+	}
+	if changed, _ := result.RowsAffected(); changed != 1 {
+		return fmt.Errorf("%w: execution %s completion was not applied", core.ErrAlreadyExists, updated.ExecutionID)
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return nil
 }
 
 // Get returns a fresh record decoded from PostgreSQL JSON, so the caller

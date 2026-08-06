@@ -38,6 +38,14 @@ Loom authenticates credentials but does not provide OIDC discovery, JWKS rotatio
 
 See [`IDENTITY.md`](IDENTITY.md).
 
+## Tamper-evident compliance records
+
+Configure a durable audit sink and use `audit.NewHashChainSink` when the
+deployment needs evidence of modification. Create signed checkpoints with a
+caller-managed key, export events and checkpoints to an immutable destination,
+and verify them before compliance reports or retention cleanup. The hash chain
+detects changes; it does not make a mutable database immutable by itself.
+
 ## Tenant boundaries
 
 Application-layer tenant resolution does not replace database isolation. Use verified tenant claims, `tenancy.NewResolver`, tenant-bound PostgreSQL transactions, and RLS for shared tables. Keep break-glass access separate, approved, and audited.

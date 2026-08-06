@@ -1,6 +1,32 @@
 name: container-scan
 
 on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+    paths:
+      - "Dockerfile"
+      - "docker-compose.yml"
+      - ".dockerignore"
+      - "go.mod"
+      - "go.sum"
+      - "cmd/**"
+      - "app/**"
+      - "runtime/**"
+      - "store/**"
+  pull_request:
+    paths:
+      - "Dockerfile"
+      - "docker-compose.yml"
+      - ".dockerignore"
+      - "go.mod"
+      - "go.sum"
+      - "cmd/**"
+      - "app/**"
+      - "runtime/**"
+      - "store/**"
+  schedule:
+    - cron: "0 3 * * 1"
   workflow_dispatch:
 
 permissions:

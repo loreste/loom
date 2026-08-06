@@ -22,13 +22,8 @@ jobs:
           cache: true
       - name: Scan Go dependencies
         run: |
-          set +e
+          set -o pipefail
           go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./... 2>&1 | tee /tmp/govulncheck.log
-          status=${PIPESTATUS[0]}
-          if [ "$status" -ne 0 ]; then
-            echo "::warning::govulncheck reported findings or could not complete; inspect the uploaded log"
-          fi
-          exit 0
       - if: always()
         uses: actions/upload-artifact@v4
         with:

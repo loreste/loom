@@ -14,8 +14,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # GitHub may return a service error when dependency graph data is not
-      # enabled for a repository. Keep the review visible without blocking
-      # unrelated CI; Dependabot and govulncheck remain active gates.
+      # Dependency review is a required security gate. Enable the repository
+      # dependency graph before merging changes that add or update packages.
       - uses: actions/dependency-review-action@v4
-        continue-on-error: true

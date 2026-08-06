@@ -37,7 +37,31 @@ func (s *MemoryStore) Put(ctx context.Context, record Record) error {
 		record.StartedAt = time.Now().UTC()
 	}
 	record.UpdatedAt = time.Now().UTC()
+	if _, exists := s.records[record.ExecutionID]; exists {
+		return fmt.Errorf("%w: execution %s already exists", core.ErrAlreadyExists, record.ExecutionID)
+	}
 	s.records[record.ExecutionID] = cloneRecord(record)
+	return nil
+}
+
+func (s *MemoryStore) Complete(ctx context.Context, updated Record) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s == nil {
+		return fmt.Errorf("execution: nil memory store")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	previous, ok := s.records[updated.ExecutionID]
+	if !ok {
+		return fmt.Errorf("%w: execution %s", core.ErrNotFound, updated.ExecutionID)
+	}
+	completed, err := CompleteRecord(previous, updated)
+	if err != nil {
+		return err
+	}
+	s.records[updated.ExecutionID] = completed
 	return nil
 }
 

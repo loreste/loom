@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"os"
 	"strconv"
 	"strings"
@@ -193,6 +194,9 @@ func TestPostgresExecutionReconcileAndRecoveryLease(t *testing.T) {
 	}
 	if err := b.ExecutionStatus.Put(ctx, record); err != nil {
 		t.Fatal(err)
+	}
+	if err := b.ExecutionStatus.Put(ctx, record); !errors.Is(err, core.ErrAlreadyExists) {
+		t.Fatalf("duplicate execution Put error = %v, want ErrAlreadyExists", err)
 	}
 	if err := b.ExecutionStatus.Enqueue(ctx, idempotency.RecoveryRecord{
 		ExecutionID: id,
