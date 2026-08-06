@@ -210,7 +210,14 @@ func (rt *Runtime) ReconcileExecution(ctx context.Context, executionID string, o
 	if rt == nil || rt.deps.ExecutionStatus == nil {
 		return execution.Record{}, fmt.Errorf("%w: execution status store is not configured", core.ErrInvalidArgument)
 	}
-	return rt.deps.ExecutionStatus.Reconcile(ctx, executionID, outcome, note)
+	record, err := rt.deps.ExecutionStatus.Reconcile(ctx, executionID, outcome, note)
+	if err != nil {
+		return execution.Record{}, err
+	}
+	if auditErr := rt.emitExecutionLifecycle(ctx, record, "execution.reconciliation", "reconciled", note); auditErr != nil {
+		return record, auditErr
+	}
+	return record, nil
 }
 
 // RetryExecutionRecording requeues only the durable idempotency/audit record;
@@ -233,8 +240,11 @@ func (rt *Runtime) RetryExecutionRecording(ctx context.Context, executionID stri
 	}); err != nil {
 		return err
 	}
-	_, err = rt.deps.ExecutionStatus.MarkRecoveryQueued(ctx, executionID)
-	return err
+	record, err = rt.deps.ExecutionStatus.MarkRecoveryQueued(ctx, executionID)
+	if err != nil {
+		return err
+	}
+	return rt.emitExecutionLifecycle(ctx, record, "execution.recovery_queued", "recovery_queued", "durable recording recovery queued")
 }
 
 // ExecutionStatusFor authenticates a caller and permits the execution owner
@@ -348,13 +358,20 @@ func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Res
 				duration = time.Since(start)
 			}
 			rt.deps.Observer.Observe(Observation{
-				Operation:        req.Operation,
-				Boundary:         req.Boundary,
-				Decision:         resp.Decision,
-				Reason:           reason,
-				Step:             step,
-				Duration:         duration,
-				IdempotentReplay: resp.IdempotentReplay,
+				ExecutionID:        resp.ExecutionID,
+				TraceID:            resp.TraceID,
+				Operation:          req.Operation,
+				OperationVersion:   resp.OperationVersion,
+				Boundary:           req.Boundary,
+				Decision:           resp.Decision,
+				Outcome:            resp.Outcome,
+				Reason:             reason,
+				Step:               step,
+				Duration:           duration,
+				IdempotentReplay:   resp.IdempotentReplay,
+				AuditID:            resp.AuditID,
+				ReliabilityWarning: resp.ReliabilityWarning,
+				Adapter:            req.Metadata["adapter"],
 			})
 		}
 	}()
@@ -522,7 +539,7 @@ func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Res
 			replay.IdempotentReplay = true
 			replay.TraceID = req.TraceID
 			// Fail closed: an audit emit error converts the replay into a deny.
-			auditID, aerr := rt.audit(ctx, req, id, op, riskLevel, core.DecisionAllow, "idempotency", "allow", "idempotent replay", start, replay.AuditID, executionID)
+			auditID, aerr := rt.audit(ctx, req, id, op, riskLevel, core.DecisionAllow, "idempotency", "allow", "idempotent replay", start, replay.AuditID, executionID, replay.Output)
 			if aerr != nil {
 				log.Printf("loom: audit emit failed on replay path (failing closed): %v", aerr)
 				return rt.deny(ctx, req, id, op, riskLevel, "audit", core.ReasonInternal, "audit emit failed: "+aerr.Error(), start, "")
@@ -643,7 +660,7 @@ func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Res
 	// deny (ReasonInternal, no output; the handler's side effects already
 	// happened — that is the documented fail-closed trade-off). Approval is
 	// already burned so a retry cannot double-execute.
-	auditID, aerr := rt.audit(ctx, req, id, op, riskLevel, core.DecisionAllow, "execute", "allow", "execution succeeded", start, "", executionID)
+	auditID, aerr := rt.audit(ctx, req, id, op, riskLevel, core.DecisionAllow, "execute", "allow", "execution succeeded", start, "", executionID, filtered)
 	if aerr != nil {
 		log.Printf("loom: audit emit failed on allow path (failing closed): %v", aerr)
 		// Do not Abort idempotency after successful handler — prevents a second side effect.
@@ -691,6 +708,7 @@ func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Res
 		if err := rt.deps.Idempotency.Complete(ctx, idemKey, stored); err != nil {
 			resp.ReliabilityWarning = "idempotency_completion_pending"
 			log.Printf("loom: CRITICAL idempotency complete failed (key held in-flight): %v", err)
+			recoveryQueued := false
 			if rt.deps.IdempotencyRecovery != nil {
 				if qerr := rt.deps.IdempotencyRecovery.Enqueue(ctx, idempotency.RecoveryRecord{
 					ExecutionID: executionID,
@@ -700,7 +718,16 @@ func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Res
 					CreatedAt:   rt.deps.Clock(),
 				}); qerr != nil {
 					log.Printf("loom: CRITICAL idempotency recovery enqueue failed: %v", qerr)
+				} else {
+					recoveryQueued = true
 				}
+			}
+			lifecycle := executionRecord
+			lifecycle.Response = resp
+			lifecycle.State = execution.StateFor(resp)
+			lifecycle.RecoveryQueued = recoveryQueued
+			if lifecycleErr := rt.emitExecutionLifecycle(ctx, lifecycle, "execution.recording_failure", "idempotency_completion_failed", "durable idempotency completion requires recovery"); lifecycleErr != nil {
+				log.Printf("loom: CRITICAL recording-failure audit emit failed: %v", lifecycleErr)
 			}
 		}
 		idemBegin = false
@@ -737,7 +764,7 @@ func (rt *Runtime) deny(
 	denial := core.SafeDenial(step, reason)
 	// The response is already a deny, so an audit emit error changes nothing
 	// for the caller — but it must be logged, not silently dropped.
-	auditID, aerr := rt.audit(ctx, req, id, op, riskLevel, core.DecisionDeny, step, reason, message, start, priorAudit, "")
+	auditID, aerr := rt.audit(ctx, req, id, op, riskLevel, core.DecisionDeny, step, reason, message, start, priorAudit, "", nil)
 	if aerr != nil {
 		log.Printf("loom: audit emit failed on deny path: %v", aerr)
 	}
@@ -763,6 +790,7 @@ func (rt *Runtime) audit(
 	start time.Time,
 	priorAudit string,
 	executionID string,
+	output map[string]any,
 ) (string, error) {
 	if executionID == "" {
 		executionID = req.ExecutionID
@@ -793,22 +821,40 @@ func (rt *Runtime) audit(
 		durMS = rt.deps.Clock().Sub(start).Milliseconds()
 	}
 	ev := audit.Event{
-		ExecutionID:        executionID,
-		TraceID:            req.TraceID,
-		Decision:           decision.String(),
-		Reason:             reason,
-		Step:               step,
-		Message:            message,
-		Principal:          string(id.ID),
-		Delegator:          string(id.Delegator),
-		Boundary:           string(req.Boundary),
-		BoundaryType:       boundaryType,
-		BoundaryParentType: parentType,
-		BoundaryParentID:   parentID,
-		TenantID:           tenantID,
-		Operation:          opName,
-		Resource:           res,
-		Risk:               riskLevel.String(),
+		Outcome:              auditOutcome(decision, reason, step),
+		OperationVersion:     operationVersion(op),
+		ResourceType:         resourceType(req.Resource),
+		ResourceID:           resourceID(req.Resource),
+		Effects:              operationEffects(op),
+		ExecutionState:       auditExecutionState(decision, reason),
+		InputDigest:          audit.Digest(req.Input),
+		OutputDigest:         audit.Digest(output),
+		OutputFieldCount:     len(output),
+		RequestedFieldCount:  len(req.Fields),
+		IdempotencyKeyDigest: audit.DigestString(req.IdempotencyKey),
+		IdempotencyState:     idempotencyAuditState(step, decision, reason, op),
+		ApprovalState:        approvalAuditState(step, decision, reason, op),
+		QuotaState:           quotaAuditState(step, decision, reason, op),
+		Adapter:              req.Metadata["adapter"],
+		SchemaVersion:        1,
+		EventType:            "execution.decision",
+		ProtocolVersion:      core.ProtocolVersion,
+		ExecutionID:          executionID,
+		TraceID:              req.TraceID,
+		Decision:             decision.String(),
+		Reason:               reason,
+		Step:                 step,
+		Message:              message,
+		Principal:            string(id.ID),
+		Delegator:            string(id.Delegator),
+		Boundary:             string(req.Boundary),
+		BoundaryType:         boundaryType,
+		BoundaryParentType:   parentType,
+		BoundaryParentID:     parentID,
+		TenantID:             tenantID,
+		Operation:            opName,
+		Resource:             res,
+		Risk:                 riskLevel.String(),
 		// Redact at the runtime boundary as well as inside the logger. A custom
 		// audit sink must never receive unrestricted request input.
 		Input:      guardrails.RedactSecrets(req.Input),
@@ -825,6 +871,139 @@ func (rt *Runtime) audit(
 // themselves panic during recovery (e.g. a broken Clock or audit sink), the
 // second-level recover still upholds the "never panics out" contract with a
 // minimal static deny (no audit — audit may be what is panicking).
+func (rt *Runtime) emitExecutionLifecycle(ctx context.Context, record execution.Record, eventType, reason, message string) error {
+	if rt == nil || rt.deps.Audit == nil {
+		return fmt.Errorf("%w: audit logger is not configured", core.ErrInvalidArgument)
+	}
+	decision := record.Response.Decision.String()
+	event := audit.Event{
+		SchemaVersion:      1,
+		EventType:          eventType,
+		ExecutionID:        record.ExecutionID,
+		ExecutionState:     string(record.State),
+		TraceID:            record.Response.TraceID,
+		ProtocolVersion:    core.ProtocolVersion,
+		Decision:           decision,
+		Outcome:            string(record.Outcome),
+		Reason:             reason,
+		Step:               "execution_status",
+		Message:            message,
+		Principal:          record.Principal,
+		Boundary:           record.Boundary,
+		Operation:          record.Operation,
+		OperationVersion:   record.OperationVersion,
+		RecoveryQueued:     record.RecoveryQueued,
+		ReconciliationNote: noteForAudit(record.ReconciliationNote),
+		ReliabilityWarning: record.Response.ReliabilityWarning,
+	}
+	_, err := rt.deps.Audit.Emit(ctx, event)
+	return err
+}
+
+func noteForAudit(note string) string {
+	return guardrails.ScrubString(note)
+}
+
+func auditOutcome(decision core.Decision, reason, step string) string {
+	if reason == core.ReasonExecutedUnconfirmed {
+		return string(core.OutcomeExecutedUnconfirmed)
+	}
+	if decision == core.DecisionAllow {
+		return string(core.OutcomeAllowed)
+	}
+	return string(core.OutcomeDenied)
+}
+
+func auditExecutionState(decision core.Decision, reason string) string {
+	if reason == core.ReasonExecutedUnconfirmed {
+		return string(execution.StateExecutedUnconfirmed)
+	}
+	if decision == core.DecisionAllow {
+		return string(execution.StateAllowed)
+	}
+	return string(execution.StateDenied)
+}
+
+func operationVersion(op *core.Operation) string {
+	if op == nil {
+		return ""
+	}
+	return op.Version
+}
+
+func resourceType(ref *core.ResourceRef) string {
+	if ref == nil {
+		return ""
+	}
+	return ref.Type
+}
+
+func resourceID(ref *core.ResourceRef) string {
+	if ref == nil {
+		return ""
+	}
+	return ref.ID
+}
+
+func operationEffects(op *core.Operation) []string {
+	if op == nil || len(op.Effects) == 0 {
+		return nil
+	}
+	effects := make([]string, len(op.Effects))
+	for i, effect := range op.Effects {
+		effects[i] = string(effect)
+	}
+	return effects
+}
+
+func idempotencyAuditState(step string, decision core.Decision, reason string, op *core.Operation) string {
+	if op == nil || !op.Idempotency.Required {
+		return "not_required"
+	}
+	if step == "idempotency" && decision == core.DecisionAllow {
+		return "replayed"
+	}
+	if reason == core.ReasonIdempotencyConflict {
+		return "conflict"
+	}
+	if step == "idempotency" {
+		return "rejected"
+	}
+	if step == "execute" && decision == core.DecisionAllow {
+		return "completed"
+	}
+	return "required"
+}
+
+func approvalAuditState(step string, decision core.Decision, reason string, op *core.Operation) string {
+	if op == nil || (!op.Approval.Required && op.Approval.MinRisk == core.RiskLow && len(op.Approval.Effects) == 0) {
+		return "not_required"
+	}
+	if step == "approval" && decision != core.DecisionAllow {
+		if reason == core.ReasonApprovalDenied {
+			return "denied"
+		}
+		return "required"
+	}
+	if step == "execute" && decision == core.DecisionAllow {
+		return "consumed"
+	}
+	return "required"
+}
+
+func quotaAuditState(step string, decision core.Decision, _ string, op *core.Operation) string {
+	if op == nil || !op.Quota.Enabled {
+		return "not_configured"
+	}
+	if step == "quotas" {
+		return "rejected"
+	}
+	if step == "execute" && decision == core.DecisionAllow {
+		return "charged"
+	}
+	return "configured"
+}
+
 func (rt *Runtime) panicDeny(ctx context.Context, req core.Request, rec any, start time.Time) (resp core.Response) {
 	defer func() {
 		if r2 := recover(); r2 != nil {

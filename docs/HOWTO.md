@@ -1,9 +1,9 @@
 # How-to guide
 
-These recipes assume a development checkout and keep Loom's deny-by-default
-behavior visible.
+These recipes assume a development checkout. They show the explicit grants and
+the single execution path that Loom requires.
 
-## Register a governed operation
+## Register an operation
 
 ```go
 op := &core.Operation{
@@ -13,52 +13,79 @@ op := &core.Operation{
     Resources:   []string{"invoice"},
     Effects:     []core.Effect{core.EffectRead},
     InputSchema: json.RawMessage(`{"type":"object","required":["id"]}`),
+    OutputSchema: json.RawMessage(`{
+        "type":"object",
+        "required":["id"],
+        "properties":{"id":{"type":"string"}}
+    }`),
 }
 
 err := a.Register(op, func(ec *core.ExecutionContext) (*core.Result, error) {
-    return &core.Result{Output: map[string]any{"id": ec.Input["id"]}}, nil
+    return &core.Result{
+        Output: map[string]any{"id": ec.Input["id"]},
+    }, nil
 })
 ```
 
-Grant every layer explicitly:
+An operation version is part of the execution contract. Keep it stable for the
+life of the contract and register a new version when the input, output, or
+authorization meaning changes.
+
+## Grant access explicitly
 
 ```go
 _ = a.AddUser(principal, token, boundary, []string{"invoice.read"})
 _ = a.AllowPolicy(policy.Rule{
-    Principal: principal, Boundary: boundary, Operation: "invoice.read",
+    Principal: principal,
+    Boundary:  boundary,
+    Operation: "invoice.read",
 })
 _ = a.AllowResource(resource.Rule{
-    Principal: principal, Boundary: boundary, Type: "invoice", ID: "*",
+    Principal:  principal,
+    Boundary:   boundary,
+    Type:       "invoice",
+    ID:         "*",
     Operations: []string{"invoice.read"},
 })
 _ = a.AllowFields(principal, boundary, "invoice.read", []string{"id"})
 _ = a.AllowInputFields(principal, boundary, "invoice.read", []string{"id"})
 ```
 
-Call it through the single entrypoint:
+Input-field grants and output-field grants are separate. A caller may be
+allowed to see a field without being allowed to change it.
+
+## Call through the runtime
 
 ```go
 resp := a.Call(ctx, core.Request{
-    Operation: "invoice.read",
+    Operation:        "invoice.read",
     OperationVersion: "1",
-    Credentials: core.Credentials{Scheme: "bearer", Token: token},
-    Boundary: boundary,
-    Resource: &core.ResourceRef{Type: "invoice", ID: invoiceID},
-    Input: map[string]any{"id": invoiceID},
+    Credentials:      core.Credentials{Scheme: "bearer", Token: token},
+    Boundary:         boundary,
+    Resource:         &core.ResourceRef{Type: "invoice", ID: invoiceID},
+    Input:            map[string]any{"id": invoiceID},
 })
 if !resp.Allowed {
     return fmt.Errorf("invoice read denied: %s", resp.Denial.Reason)
 }
+```
 
-// For a side-effecting operation, an executed_unconfirmed outcome means the
-// handler may have run. Check status/reconciliation using resp.ExecutionID
-// before retrying; do not treat it as an ordinary safe denial.
+For a side-effecting call, `OutcomeExecutedUnconfirmed` means the handler may
+have run even though durable completion was not confirmed. Query and reconcile
+the execution record before retrying:
+
+```go
 if resp.Outcome == core.OutcomeExecutedUnconfirmed {
-    log.Printf("reconcile execution %s before retry", resp.ExecutionID)
+    record, err := a.Runtime.ExecutionStatus(ctx, resp.ExecutionID)
+    if err != nil {
+        return err
+    }
+    _ = record
+    // Confirm the external result, then reconcile with the confirmed outcome.
 }
 ```
 
-For remote callers, query the execution record before retrying:
+Remote callers can use the corresponding endpoints:
 
 ```bash
 curl --fail-with-body \
@@ -72,79 +99,67 @@ curl --fail-with-body -X POST \
   "http://127.0.0.1:8080/v1/executions/$EXECUTION_ID/reconcile"
 ```
 
+Reconciliation records what happened; it never reruns the business handler.
+
 ## Govern database access
 
-## Schema and financial inputs
-
-Loom validates a declared `OutputSchema` after the handler returns. The
-supported Loom Schema subset is documented in the guardrails package and
-rejects unsupported keywords rather than silently ignoring them. Use nested
-`items`, `properties`, `required`, `additionalProperties`, enums/constants,
-length and range constraints, and declare only the keywords Loom supports.
-
-Money operations must use exact `core.Money` values. A three-letter code is only
-syntactic validation; configure `Operation.AllowedCurrencies` for accepted
-currencies, and use `FinancialGuard.MaxByCurrency` when limits differ by
-currency. Do not compare payment amounts as `float64`; use `core.ParseMoney` or
-the `core.Money` fields for exact comparisons. For signed ledger adjustments,
-use `core.MoneyDelta` rather than weakening the non-negative payment type.
-
-Input field grants are separate from output projection grants:
-
-```go
-_ = a.AllowFields(principal, boundary, "customer.update", []string{"id", "name"})
-_ = a.AllowInputFields(principal, boundary, "customer.update", []string{"name"})
-```
-
-This allows a caller to read a field without implicitly allowing it to change
-that field.
-
-Prefer domain operations with fixed SQL. If a controlled administrative tool
-needs SQL, register a pool with an allowlist, enable `db.query` or `db.exec`,
-and grant access to the specific principal and boundary.
+Prefer domain handlers with fixed, parameterized SQL. If an administrative
+operation genuinely needs governed SQL, register an allowlisted pool and grant
+the caller the `db.query` or `db.exec` capability:
 
 ```go
 _ = a.OpenDB("primary", "pgx", os.Getenv("DATABASE_URL"), db.Options{
-    AllowedTables: []string{"public.invoices"},
-    MaxRows: 500,
+    AllowedTables:    []string{"public.invoices"},
+    MaxRows:          500,
     StatementTimeout: 5 * time.Second,
 })
 _ = a.EnableDBOps()
 ```
 
-Loom rejects multi-statement input, comments, DDL, dangerous functions, and
-tables outside the configured allowlist. Use restricted database roles,
-PostgreSQL RLS, timeouts, and tenant-bound transactions as defense in depth.
+Loom rejects multi-statement input, comments, DDL/admin statements, dangerous
+functions, and tables outside the configured allowlist. Use restricted roles,
+PostgreSQL RLS, statement timeouts, connection limits, and tenant-bound
+transactions as additional database controls. Loom does not provide row-level
+tenant isolation by itself.
 
-## Expose the same runtime over HTTP
+## Use exact financial values
 
-```bash
-go run ./cmd/loom serve --addr=:8080
+Money effects use `core.Money`, not `float64`:
+
+```go
+amount, err := core.ParseMoney(input["amount"], "USD")
+if err != nil {
+    return err
+}
+_ = amount
+
+op.AllowedCurrencies = []string{"USD", "EUR"}
 ```
 
-The primary endpoint is `POST /v1/execute`. Discovery is at
-`/.well-known/loom.json`; capability-filtered OpenAPI is at
-`/v1/openapi.json`. MCP, GraphQL, gRPC, and Weft are adapters over the same
-pipeline, not alternate authorization paths.
+The three-letter currency code is syntactically validated. Operations should
+set `AllowedCurrencies` when only specific currencies are acceptable. Use
+`core.MoneyDelta` for signed ledger adjustments rather than weakening the
+non-negative payment amount type.
 
-## Add approvals and idempotency
-
-Mark sensitive operations with approval and idempotency requirements:
+## Require approval and idempotency
 
 ```go
 op.Approval = core.ApprovalPolicy{MinRisk: core.RiskHigh}
-op.Idempotency = core.IdempotencyPolicy{Required: true, TTLSeconds: 3600}
+op.Idempotency = core.IdempotencyPolicy{
+    Required:   true,
+    TTLSeconds: 3600,
+}
 ```
 
-The runtime evaluates approval, reserves the idempotency key, consumes the
-single-use approval immediately before the handler, and audits the result. A
-failed handler burns the approval token by design. Clients must reuse the same
-idempotency key for a safe retry.
+The runtime validates approval, reserves idempotency, charges quota, and claims
+the single-use approval before the handler runs. A failed handler does not
+restore a consumed approval token. Clients should reuse the same idempotency
+key when retrying an operation.
 
 ## Configure durable execution status
 
-Side-effecting operations in production need an `execution.Store` that survives
-restart. PostgreSQL is the shared option for multiple replicas:
+Side-effecting production operations need an `execution.Store` that survives a
+process restart. PostgreSQL is the shared option for multiple replicas:
 
 ```go
 bundle, err := postgres.NewBundle(ctx, os.Getenv("LOOM_DATABASE_URL"))
@@ -154,40 +169,47 @@ if err != nil {
 defer bundle.Close()
 
 a, err := app.New(app.Config{
-    Environment:     "production",
-    ApprovalEngine:   bundle.Approvals,
-    IdempotencyStore: bundle.Idempotency,
-    ExecutionStore:   bundle.ExecutionStatus,
-    AuditSink:        bundle.Audit,
+    Environment:       "production",
+    ApprovalEngine:     bundle.Approvals,
+    IdempotencyStore:   bundle.Idempotency,
+    ExecutionStore:     bundle.ExecutionStatus,
+    AuditSink:          bundle.Audit,
 })
 ```
 
-For a single node, `DataDir` bootstrap creates `executions.json` alongside
-approval and idempotency state. It is not a multi-node store. Applications
-that provide their own store should preserve the same guarantees: atomic
-insert/update, one-way reconciliation, deep-copy boundaries, and durable
-recovery queue state.
-
-When idempotency completion needs asynchronous recovery, workers claim a
-short-lived PostgreSQL recovery lease, complete the recording, and release the
-lease. A worker must not rerun the business handler for this task. Use the
-execution ID to reconcile the external side effect separately.
+For a single node, bootstrap with `DataDir` to use file-backed execution,
+approval, idempotency, and audit state. The file store is not a multi-node
+coordination system. PostgreSQL recovery workers claim short-lived leases to
+complete durable recording; they must not rerun a business handler.
 
 ## Run background jobs safely
 
-Use `job.Runner` with an `app.App` or runtime caller. Every queued job becomes
-a request and passes the full pipeline.
+Use `job.Runner` with an `app.App` or runtime caller. Queue delivery is not a
+privilege path: every job becomes a request and passes the full pipeline.
 
 ```go
-runner := &job.Runner{Queue: queue, Caller: a, Token: serviceToken}
+runner := &job.Runner{
+    Queue:  queue,
+    Caller: a,
+    Token:  serviceToken,
+}
 ```
 
-The queue is delivery infrastructure, not a privilege path.
+## Expose the same runtime over HTTP
+
+```bash
+go run ./cmd/loom serve --addr=:8080
+```
+
+The primary endpoint is `POST /v1/execute`. Discovery is available at
+`/.well-known/loom.json`; capability-filtered OpenAPI is available at
+`/v1/openapi.json`. MCP, GraphQL, gRPC, CLI, and Weft remain adapters over the
+same runtime.
 
 ## Add metrics and tracing
 
-`app.App` and `bootstrap.Platform` expose a `runtime.Metrics` collector. Pass it
-to the HTTP adapter for Prometheus text metrics:
+`app.App` and `bootstrap.Platform` expose a `runtime.Metrics` collector. Pass
+it to the HTTP adapter to expose Prometheus text metrics:
 
 ```go
 srv, _ := loomhttp.NewServer(a.Runtime, loomhttp.ServerConfig{
@@ -195,20 +217,20 @@ srv, _ := loomhttp.NewServer(a.Runtime, loomhttp.ServerConfig{
 })
 ```
 
-For OpenTelemetry, implement `runtime.Observer` and attach it through
-`runtime.Dependencies.Observer`. Keep credentials, SQL, request bodies, and
-tenant secrets out of labels and span attributes. See
-[OBSERVABILITY.md](OBSERVABILITY.md).
+For OpenTelemetry or an existing metrics system, attach a
+`runtime.Observer` through `runtime.Dependencies.Observer`. Do not put tokens,
+SQL, request bodies, or tenant secrets in labels or span attributes. See
+[`OBSERVABILITY.md`](OBSERVABILITY.md).
 
 ## Test an adversarial path
 
-For every new control, add a test attempting to bypass it: wrong tenant,
+For every new control, add a test that tries to bypass it: wrong tenant,
 missing policy, forged adapter metadata, replayed approval, duplicate
-idempotency key, unsafe SQL, unexpected output field, canceled context, or a
+idempotency key, unsafe SQL, unexpected output, canceled context, or a
 panicking guardrail.
 
 ```bash
 go vet ./...
 go test -race ./...
-go test -fuzz=FuzzExecute -fuzztime=10s ./runtime/
+go test -fuzz=FuzzExecute -fuzztime=15s ./runtime/
 ```

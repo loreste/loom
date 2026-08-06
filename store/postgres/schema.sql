@@ -97,6 +97,38 @@ CREATE INDEX IF NOT EXISTS idx_loom_audit_trace ON loom_audit (trace_id);
 CREATE INDEX IF NOT EXISTS idx_loom_audit_principal ON loom_audit (principal);
 CREATE INDEX IF NOT EXISTS idx_loom_audit_tenant ON loom_audit (tenant_id);
 
+-- Compliance event fields are additive so existing audit history survives upgrades.
+ALTER TABLE loom_audit ADD COLUMN IF NOT EXISTS schema_version INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE loom_audit ADD COLUMN IF NOT EXISTS event_type TEXT NOT NULL DEFAULT 'execution.decision';
+ALTER TABLE loom_audit ADD COLUMN IF NOT EXISTS execution_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE loom_audit ADD COLUMN IF NOT EXISTS execution_state TEXT NOT NULL DEFAULT '';
+ALTER TABLE loom_audit ADD COLUMN IF NOT EXISTS execution_revision BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE loom_audit ADD COLUMN IF NOT EXISTS recovery_queued BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE loom_audit ADD COLUMN IF NOT EXISTS reconciliation_note TEXT NOT NULL DEFAULT '';
+ALTER TABLE loom_audit ADD COLUMN IF NOT EXISTS protocol_version TEXT NOT NULL DEFAULT '1';
+ALTER TABLE loom_audit ADD COLUMN IF NOT EXISTS outcome TEXT NOT NULL DEFAULT '';
+ALTER TABLE loom_audit ADD COLUMN IF NOT EXISTS operation_version TEXT NOT NULL DEFAULT '';
+ALTER TABLE loom_audit ADD COLUMN IF NOT EXISTS resource_type TEXT NOT NULL DEFAULT '';
+ALTER TABLE loom_audit ADD COLUMN IF NOT EXISTS resource_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE loom_audit ADD COLUMN IF NOT EXISTS effects JSONB;
+ALTER TABLE loom_audit ADD COLUMN IF NOT EXISTS input_digest TEXT NOT NULL DEFAULT '';
+ALTER TABLE loom_audit ADD COLUMN IF NOT EXISTS output_digest TEXT NOT NULL DEFAULT '';
+ALTER TABLE loom_audit ADD COLUMN IF NOT EXISTS output_field_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE loom_audit ADD COLUMN IF NOT EXISTS requested_field_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE loom_audit ADD COLUMN IF NOT EXISTS boundary_type TEXT NOT NULL DEFAULT '';
+ALTER TABLE loom_audit ADD COLUMN IF NOT EXISTS boundary_parent_type TEXT NOT NULL DEFAULT '';
+ALTER TABLE loom_audit ADD COLUMN IF NOT EXISTS boundary_parent_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE loom_audit ADD COLUMN IF NOT EXISTS idempotency_key_digest TEXT NOT NULL DEFAULT '';
+ALTER TABLE loom_audit ADD COLUMN IF NOT EXISTS idempotency_state TEXT NOT NULL DEFAULT '';
+ALTER TABLE loom_audit ADD COLUMN IF NOT EXISTS approval_state TEXT NOT NULL DEFAULT '';
+ALTER TABLE loom_audit ADD COLUMN IF NOT EXISTS quota_state TEXT NOT NULL DEFAULT '';
+ALTER TABLE loom_audit ADD COLUMN IF NOT EXISTS reliability_warning TEXT NOT NULL DEFAULT '';
+ALTER TABLE loom_audit ADD COLUMN IF NOT EXISTS adapter TEXT NOT NULL DEFAULT '';
+ALTER TABLE loom_audit ADD COLUMN IF NOT EXISTS prior_audit_id TEXT NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS idx_loom_audit_execution ON loom_audit (execution_id);
+CREATE INDEX IF NOT EXISTS idx_loom_audit_operation ON loom_audit (operation, operation_version);
+CREATE INDEX IF NOT EXISTS idx_loom_audit_decision_reason ON loom_audit (decision, reason);
+
 -- Distributed policy documents (replace semantics by version).
 CREATE TABLE IF NOT EXISTS loom_policy (
     id         TEXT PRIMARY KEY,

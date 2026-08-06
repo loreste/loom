@@ -1,21 +1,75 @@
 # Build and release
 
-Loom has no required runtime service for embedded use. The Go module, SDK
-packages, Docker image, release binaries, and installer are all built from
-the repository.
+Loom can be embedded without a separate service. The repository also builds a
+CLI, a Docker image, cross-platform release binaries, and SDK packages from the
+source tree.
+
+## Local checks
 
 ```bash
+make test
 make test-race
+make vet
 make build
-make release LOOM_VERSION=$(tr -d '[:space:]' < VERSION)
-docker build --build-arg VERSION=$(tr -d '[:space:]' < VERSION) -t loom:local .
+make fuzz FUZZ_TIME=15s
 ```
 
-`LOOM_VERSION`, `LOOM_COMMIT`, `LOOM_BUILD_DATE`, `DIST_DIR`, and
-`VERSION_FILE` are overrideable. Runtime credentials, database URLs, identity
-configuration, and tenant policy are never embedded in release artifacts.
+The `sdk` Make target is informational; language-specific SDK checks are run by
+the CI workflow and are documented in the SDK READMEs.
 
-The release workflow publishes the cross-platform binaries when a `v*` tag is
-created. The installer requires `LOOM_REPOSITORY` (or `GITHUB_REPOSITORY`) and
-an exact `LOOM_VERSION`, then installs into `LOOM_INSTALL_DIR` (defaulting to
-the user's local bin).
+## Build a release binary
+
+The root [`VERSION`](../VERSION) file is the default version source. Build all
+release targets locally with:
+
+```bash
+make release
+```
+
+Artifacts are written to `dist/` as:
+
+```text
+loom-VERSION-linux-amd64
+loom-VERSION-linux-arm64
+loom-VERSION-darwin-amd64
+loom-VERSION-darwin-arm64
+loom-VERSION-windows-amd64.exe
+loom-VERSION-windows-arm64.exe
+```
+
+Override `LOOM_VERSION`, `LOOM_COMMIT`, `LOOM_BUILD_DATE`, `DIST_DIR`, or
+`VERSION_FILE` when a build pipeline supplies those values. Set `GOOS`,
+`GOARCH`, or `LOOM_TARGETS` to build a smaller target set.
+
+Runtime credentials, database URLs, identity configuration, tenant policy, and
+application secrets are never embedded in release artifacts.
+
+## Docker image
+
+The Dockerfile builds the CLI with CGO disabled and runs it as a non-root user
+from a distroless base image:
+
+```bash
+docker build \
+  --build-arg VERSION="$(tr -d '[:space:]' VERSION)" \
+  -t loom:local .
+```
+
+The repository does not publish a default container image. Use an organization
+registry and signing policy when distributing the image.
+
+## GitHub release workflow
+
+Pushing a tag matching `v*` runs the release workflow. It builds Linux, macOS,
+and Windows binaries for amd64 and arm64, creates a CycloneDX SBOM, and attaches
+the assets to a GitHub release. The installer in `scripts/install.sh` downloads
+an exact asset for supported Linux and macOS hosts.
+
+The workflow does not publish Python, npm, or Rust packages. Those SDKs are
+installed from a checkout until package publication is added deliberately.
+
+## Build metadata
+
+The CLI accepts link-time values for version, commit, and build date. A normal
+development build uses the root `VERSION` value for its default version and
+reports `unknown` for metadata that was not supplied by the build pipeline.

@@ -1,46 +1,38 @@
 # Loom Rust SDK
 
-## Use from a checkout
+This crate is a thin HTTP client. Governance remains server-side and the SDK
+cannot grant permissions.
+
+The current repository release is used as a path dependency; it is not
+published to crates.io by the current release workflow:
 
 ```toml
 [dependencies]
 loom-sdk = { path = "../loom/sdk/rust" }
 ```
 
-The client talks to a running Loom HTTP adapter; authorization remains
-server-side. See [`../../docs/INSTALL.md`](../../docs/INSTALL.md).
+Example:
 
 ```rust
-use loom_sdk::{Call, Client, ResourceRef};
-use serde_json::json;
-use std::collections::HashMap;
+use loom_sdk::{Call, Client};
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let token = std::env::var("LOOM_TOKEN")?;
-    let c = Client::new("http://127.0.0.1:8080", &token)?;
-    let resp = c
-        .call(Call {
-            operation: "document.read".into(),
-            boundary: "dev".into(),
-            input: json!({"id": "1"}),
-            resource: Some(ResourceRef {
-                type_: "document".into(),
-                id: "1".into(),
-            }),
-            fields: None,
-            idempotency_key: None,
-            approval_token: None,
-            token: None,
-            metadata: HashMap::new(),
-            trace_id: None,
-        })
-        .await?;
-    assert!(resp.allowed);
-
-    // Agent discovery
-    let _manifest = c.manifest().await?;
-    let _openapi = c.openapi().await?;
-    Ok(())
-}
+let token = std::env::var("LOOM_TOKEN")?;
+let client = Client::new("http://127.0.0.1:8080", token)?;
+let response = client.call(Call {
+    operation: "document.read".into(),
+    operation_version: Some("1".into()),
+    boundary: "dev".into(),
+    input: serde_json::json!({"id": "1"}),
+    resource: None,
+    fields: None,
+    idempotency_key: None,
+    approval_token: None,
+    token: None,
+    metadata: Default::default(),
+    trace_id: None,
+}).await?;
 ```
+
+See [`../../docs/INSTALL.md`](../../docs/INSTALL.md) and
+[`../../docs/SDK.md`](../../docs/SDK.md) for server setup and reliability
+outcomes.

@@ -1,201 +1,202 @@
 # Loom
 
-Loom is an embed-first governance runtime for Go applications. It puts one
-controlled execution path in front of operations that call handlers, access a
-database, run jobs, change payments or credit, provision services, or perform
-administrative work.
+Loom is an embed-first governance runtime for Go applications. It gives
+operations one controlled execution path, whether they arrive from a web
+request, a worker, an MCP tool, an administrative command, or code in the same
+process.
 
-Loom has been used internally for the past two months. We are now making it
-available as open source so the implementation, examples, and trade-offs can
-be reviewed and used by other teams.
+Loom has been used internally for the past two months. We are publishing it
+as open source so the implementation, examples, and trade-offs can be reviewed
+and used by other teams.
 
-## Why it exists
+## Why Loom exists
 
-Sensitive operations usually acquire several entry points as an application
-grows: an HTTP endpoint, a worker, an internal service, an administrative CLI,
-an MCP tool, or code running in the same process. When each entry point carries
-its own checks, the rules can diverge.
+As an application grows, sensitive work tends to acquire several entry points:
 
-That divergence creates practical problems:
+- an HTTP endpoint;
+- a background worker;
+- an internal service or CLI;
+- an MCP, GraphQL, or gRPC operation; and
+- an in-process call from another package.
 
-- one transport checks a permission that another transport misses;
-- a worker can perform an operation that the user-facing path rejects;
-- application code reaches the database without the same policy checks;
-- retries repeat an operation with side effects;
-- tenant context is lost before a database query runs; and
-- an operator cannot easily see which check caused a denial.
+When each entry point implements its own checks, the rules eventually diverge.
+That creates practical security and reliability problems:
 
-Loom addresses this by making the operation, rather than the transport, the
-unit of authorization. HTTP, MCP, GraphQL, gRPC, Weft, workers, and in-process
-callers can all reach the same runtime.
+- one transport checks a permission while another misses it;
+- a worker can perform an operation rejected by the user-facing path;
+- product code reaches a database without the same policy checks;
+- retries repeat a payment or another side effect; and
+- tenant context is lost before a database query runs.
 
-## How it works
+Loom makes the governed operation, rather than the transport, the unit of
+authorization. Adapters translate requests into the same runtime contract;
+they do not create alternate authorization paths.
 
-Application code registers named operations and invokes them through
-`app.Call` or `runtime.Runtime.Execute`:
+## What Loom does
+
+The default decision is deny. `app.App.Call` and
+`runtime.Runtime.Execute` run the request through a common pipeline:
 
 ```text
-caller or adapter
-        → identity and boundary checks
-        → operation and resource policy
-        → contextual policy and guardrails
-        → risk, approval, idempotency, and quota checks
-        → handler or governed database executor
-        → output filtering and audit
+identity and delegation
+  → tenant/boundary resolution
+  → operation and resource policy
+  → input-field authorization
+  → contextual policy and guardrails
+  → risk, approval, idempotency, and quota checks
+  → handler or governed database executor
+  → output schema validation, filtering, and redaction
+  → execution status and audit
 ```
 
-The default decision is deny. Unknown operations, missing rules, failed
-verification, invalid boundaries, and enforcement errors fail closed. Approval
-tokens are consumed before side effects, and idempotency can protect retries.
+Unknown operations, missing rules, verification failures, invalid boundaries,
+and enforcement errors fail closed. Approval tokens are claimed before a
+handler runs. Idempotency protects operations that require safe retries.
+Side-effecting calls that run but cannot confirm durable completion return an
+`executed_unconfirmed` outcome and an execution ID; callers must reconcile the
+status before retrying.
 
-Database access is registered through Loom's database layer rather than passed
-to application callers as a raw `*sql.DB`. The SQL guard rejects classes of
-input such as multi-statement queries, comments, DDL, and dangerous functions.
-It is an additional check, not a replacement for restricted database roles,
-PostgreSQL RLS, timeouts, and tenant-aware transactions.
+Loom's SQL guard rejects multi-statement input, comments, DDL/admin statements,
+and dangerous functions. It is defense in depth, not a replacement for
+restricted database roles, PostgreSQL RLS, statement timeouts, or tenant-aware
+transactions.
 
-## What Loom is and is not
+## Compliance visibility
 
-Loom provides:
+Every governed attempt produces a structured audit decision with an execution ID, trace ID, selected operation version, adapter, boundary, enforcement stage, stable reason code, outcome, and redacted correlation digests. Reconciliation and recovery actions are recorded as lifecycle events. `runtime.Metrics` exposes bounded counters for denials, replays, quota and approval outcomes, idempotency conflicts, and uncertain executions.
 
-- an embedded authorization and execution pipeline;
-- a registry for governed operations;
-- resource and field-level access checks;
-- approvals, risk classification, quotas, and idempotency controls;
-- governed database access;
-- output filtering, redaction, and audit events; and
-- optional protocol adapters using the same runtime.
+Loom keeps credentials, approval tokens, idempotency keys, raw SQL, and unrestricted request bodies out of audit events. Configure a durable PostgreSQL or JSONL sink for production and export it to the immutable archive, SIEM, or compliance system required by your organization. See [`docs/OBSERVABILITY.md`](docs/OBSERVABILITY.md).
 
-Loom is not an identity provider, an OIDC service, an ORM, or a guarantee of
-tenant isolation by itself. Production applications still need a real identity
-verifier, durable security state, restricted database credentials, database
-isolation, and operational monitoring. Loom also does not define an
-application's domain model or decide which operations an application should
-allow.
+## What Loom is not
+
+Loom is not an identity provider, OIDC discovery service, ORM, or complete
+tenant-isolation solution. It authenticates credentials presented by an
+application-provided verifier and then applies policy to the verified identity.
+Production deployments still need an identity integration, durable state,
+database isolation, secrets management, and operational monitoring.
+
+Loom also does not define an application's domain model or decide which
+operations that application should expose.
 
 ## Status
 
-The current public release is `v0.1.5`. It is an early open-source release.
-The runtime has been exercised internally and includes tests across its main
-packages. Production integrations, packaging, and documentation will continue
-to evolve with use.
+The version in [`VERSION`](VERSION) is the release source of truth. See the
+[release page](https://github.com/loreste/loom/releases) for published binary
+assets. This is an early public release; production identity integration and
+database isolation remain responsibilities of the integrating application.
 
 ## Quick start
 
-Start with the [installation guide](docs/INSTALL.md) and then follow the
-[how-to guide](docs/HOWTO.md):
+For a local embedded example:
 
 ```bash
 git clone https://github.com/loreste/loom.git
 cd loom
 make build
-LOOM_EXAMPLE_TOKEN="$(openssl rand -hex 24)" go run ./examples/orders-app/
+LOOM_EXAMPLE_TOKEN="$(openssl rand -hex 24)" \
+  go run ./examples/orders-app/
 ```
 
-Other local examples:
+To run the HTTP adapter with a development principal, use the same token for
+the server and the client:
 
 ```bash
-LOOM_EXAMPLE_TOKEN="$(openssl rand -hex 24)" \\
-LOOM_EXAMPLE_APPROVAL_TOKEN="$(openssl rand -hex 24)" \\
-go run ./examples/embed/         # governed SQLite access in-process
-LOOM_WORKER_TOKEN="$(openssl rand -hex 24)" go run ./examples/worker/ # jobs that use the same Call path
-go test -race ./...
+export LOOM_TOKEN="loom-dev-$(openssl rand -hex 24)"
+export LOOM_DEMO_TOKEN_ALICE="$LOOM_TOKEN"
+go run ./cmd/loom serve --addr=:8080
 ```
 
-To add Loom to a Go application, use the tagged module release:
+Then follow the [documentation index](docs/README.md), which links to the
+[installation guide](docs/INSTALL.md), [how-to guide](docs/HOWTO.md),
+[HTTP API guide](docs/API.md), and [SDK quick starts](docs/SDK.md).
+
+To add Loom to another Go module, use an exact release tag:
 
 ```bash
-go get github.com/loreste/loom@v0.1.5
+go get github.com/loreste/loom@vX.Y.Z
 ```
 
-Then register operations and call them through the application API:
+The Go module is available through the repository. The Python, TypeScript,
+and Rust SDKs are currently installed from this repository; their installation
+status is documented in [SDK.md](docs/SDK.md).
 
-```go
-a, err := app.New(app.Config{})
-if err != nil {
-	return err
-}
+## Optional protocol adapters
 
-response := a.Call(ctx, core.Request{
-	Operation: "order.create",
-	Credentials: core.Credentials{
-		Scheme: "bearer",
-		Token:  token,
-	},
-	Boundary: "development",
-	Input: map[string]any{
-		"sku": "example-sku",
-	},
-})
-if !response.Allowed {
-	return fmt.Errorf("operation denied: %s", response.Denial.Reason)
-}
-```
-
-See [EMBED.md](docs/EMBED.md) for database registration, bootstrapping, and
-background jobs. Language-specific Go, Python, TypeScript/Node, and Rust
-examples are in [SDK.md](docs/SDK.md).
-
-## Optional network adapters
-
-When callers need a network interface, run the HTTP and gRPC adapters or use
-the other adapters in the repository. They all translate requests into the
-same execution path:
-
-```bash
-go run ./cmd/loom serve --addr=:8080 --grpc-addr=:9090
-```
+The adapters below all reach the same execution runtime:
 
 | Interface | Entry point |
 | --- | --- |
 | HTTP | `POST /v1/execute` |
 | Execution status | `GET /v1/executions/{execution_id}` |
 | Execution reconcile | `POST /v1/executions/{execution_id}/reconcile` |
+| Execution recording retry | `POST /v1/executions/{execution_id}/retry_recording` |
 | Discovery | `GET /.well-known/loom.json` |
 | OpenAPI | `GET /v1/openapi.json` |
 | MCP | `POST /mcp` |
 | GraphQL | `POST /graphql` |
 | gRPC | `loom.v1.Runtime/Execute` |
+| Weft | in-process adapter and Go SDK |
 
-The Go, Python, TypeScript, and Rust SDKs call the HTTP adapter. They do not
-grant themselves additional permissions.
+Start the network adapters with:
+
+```bash
+go run ./cmd/loom serve --addr=:8080 --grpc-addr=:9090
+```
+
+The Go SDK supports both in-process calls and the HTTP adapter. Python,
+TypeScript/Node, and Rust SDKs call the HTTP adapter. None of the SDKs grant
+themselves additional permissions.
 
 ## Production considerations
 
-Do not expose the development configuration on a public network. Before using
-Loom in production, configure a real identity verifier, disable demo
-principals, and use durable stores for approvals, idempotency, quotas, and
-audit as appropriate for the deployment.
+Before using Loom for production side effects:
+
+- inject a real identity verifier and configure issuer, audience, key rotation,
+  certificate rotation, and revocation behavior;
+- disable demo principals;
+- use PostgreSQL-backed execution, approval, idempotency, and audit state for
+  multi-node deployments;
+- use Redis when quotas must be shared across replicas;
+- use restricted database roles, PostgreSQL RLS, tenant-bound transactions,
+  timeouts, and connection limits; and
+- protect readiness, metrics, status, and reconciliation endpoints.
 
 Read:
 
-- [SECURITY.md](docs/SECURITY.md) for the security model and limits;
-- [IDENTITY.md](docs/IDENTITY.md) for OIDC/JWKS and mTLS integration;
-- [TENANCY.md](docs/TENANCY.md) and the [tenant example](examples/tenancy/README.md)
-  for application and database isolation;
-- [OBSERVABILITY.md](docs/OBSERVABILITY.md) for metrics and tracing; and
+- [INSTALL.md](docs/INSTALL.md) for source, binary, Docker, and production setup;
+- [CONFIGURATION.md](docs/CONFIGURATION.md) for environment variables and CLI flags;
+- [API.md](docs/API.md) for HTTP requests, responses, and execution recovery;
+- [OPERATIONS.md](docs/OPERATIONS.md) for deployment, monitoring, and incident handling;
+- [SECURITY.md](docs/SECURITY.md) for guarantees and deployment boundaries;
+- [IDENTITY.md](docs/IDENTITY.md) for production verifier integration;
+- [TENANCY.md](docs/TENANCY.md) and the [tenant example](examples/tenancy/README.md);
+- [OBSERVABILITY.md](docs/OBSERVABILITY.md) for metrics and tracing;
 - [COMPATIBILITY.md](docs/COMPATIBILITY.md) for protocol and SDK contracts;
-- [SCHEMA.md](docs/SCHEMA.md) for the bounded input and output schema contract; and
-- [SDK.md](docs/SDK.md) for installation and examples for Go, Weft, Python, Node.js, TypeScript, and Rust.
+- [SCHEMA.md](docs/SCHEMA.md) for the bounded Loom Schema; and
+- [SDK.md](docs/SDK.md) for Go, Weft, Python, Node.js/TypeScript, and Rust usage.
 
 ## Repository layout
 
 | Area | Purpose |
 | --- | --- |
-| `app`, `runtime` | Embed API and execution pipeline |
+| `app`, `runtime` | Embedded execution pipeline |
 | `db` | Database pools, SQL checks, migrations, and governed queries |
-| `policy`, `identity`, `boundary`, `resource` | Policy building blocks |
-| `approval`, `risk`, `quotas`, `idempotency`, `audit` | Execution controls and records |
-| `adapters/*` | Optional HTTP, CLI, MCP, GraphQL, gRPC, and Weft adapters |
+| `policy`, `identity`, `boundary`, `resource` | Policy and identity building blocks |
+| `approval`, `risk`, `quotas`, `idempotency`, `execution`, `audit` | Execution controls and records |
+| `adapters/*` | Optional HTTP, CLI, MCP, GraphQL, gRPC, and Weft edges |
 | `store/postgres` | Durable PostgreSQL backends |
 | `sdk/*` | Go, Python, TypeScript, and Rust clients |
-| `examples/*` | Runnable examples; not production applications |
+| `examples/*` | Runnable examples; they are not production applications |
 
-## Tests
+## Verification
 
-The main CI workflow runs Go vet, race-enabled tests, runtime fuzzing, builds,
-PostgreSQL integration tests, SDK checks, and cross-SDK contract tests. Local
-Go checks are:
+The main CI workflow runs Go vet, race-enabled tests, fuzz smoke tests,
+PostgreSQL integration tests, SDK builds/tests, and cross-SDK contract tests.
+Security workflows run Go vulnerability and static checks, CodeQL, secret
+scanning, dependency review, and SBOM generation. Container scanning is
+available as a manually dispatched workflow.
+
+Useful local checks:
 
 ```bash
 go vet ./...
@@ -203,8 +204,6 @@ go test -race ./...
 go test -fuzz=FuzzExecute -fuzztime=15s ./runtime/
 go build ./...
 ```
-
-Language-specific SDK checks are documented in the SDK READMEs and run in CI.
 
 ## License
 

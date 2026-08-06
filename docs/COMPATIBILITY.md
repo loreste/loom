@@ -1,43 +1,53 @@
 # Compatibility contracts
 
-Loom adapters and SDKs share one execution contract. The current protocol
-version is `1`, exposed as `X-Loom-Protocol-Version: 1` on HTTP responses.
+Loom adapters and SDKs share protocol version `1`, exposed by HTTP responses as
+`X-Loom-Protocol-Version: 1`. The protocol version is separate from the Loom
+release version in [`VERSION`](../VERSION).
 
-## Operation versions and execution outcomes
+## Operation versions and outcomes
 
-Every registered operation has an exact `Version`; the default is `"1"`.
-Requests select it with `operation_version`. An unknown or mismatched version
-is denied, and idempotency storage keys include the selected version. Every
-execution response returns the selected `OperationVersion` when a contract
-was resolved; unknown operations return the normalized requested version.
+Every registered operation has an exact `Version`. An empty request version
+selects the registry's default operation version; a supplied version must match
+exactly. The selected version is returned in the execution response and is
+included in idempotency fingerprints, approval binding, execution records, and
+policy evaluation.
 
-`executed_unconfirmed` means the handler may have run but post-execution
-recording could not be confirmed. Callers must query the execution record and
-reconcile it before retrying a side-effecting operation. `retry_recording`
-requeues recording work only; it never reruns the handler.
+An unknown operation or version is denied. Operations should register a new
+version when an input, output, or authorization contract changes. The registry
+does not silently select an incompatible version.
 
-## Compatibility rules
+`executed_unconfirmed` means a handler may have run but durable post-execution
+recording was not confirmed. Callers must query the execution record and
+reconcile the external result before retrying a side-effecting operation.
+Recording retry queues the recording work only; it never reruns the handler.
 
-The following rules apply within protocol version 1:
+## Compatibility rules within protocol version 1
 
 - Response fields may be added, but existing field meanings and JSON types do
   not change.
 - Denial reason codes are stable machine-readable identifiers. New codes are
-  additive; callers must treat unknown codes as internal denial.
+  additive; changing the meaning of an existing code requires a new protocol
+  version.
 - Operation names, schemas, field grants, risk, approval, idempotency, and
-  currency requirements are versioned application policy, not SDK defaults.
-- SDKs send the protocol header and preserve unknown response fields.
+  quota policy are bound to the selected operation version.
+- SDKs send the protocol header and preserve response fields they do not use.
 - OpenAPI and MCP documents are capability-filtered projections, not
-  authorization decisions; policy changes may change their contents.
-- Policy documents use monotonically increasing versions. Nodes reject stale
-  or newer-than-supported documents rather than silently applying them.
-- Database migrations are forward-compatible with the running binary;
-  PostgreSQL schema checks refuse silent downgrade.
+  authorization decisions. Their contents can change when policy changes.
+- Policy documents use monotonically increasing versions. A node rejects stale
+  or unsupported policy documents instead of applying them silently.
+- PostgreSQL migrations are forward-only for a running binary; schema version
+  checks refuse silent downgrade.
 
 Breaking changes require a new protocol major, a migration note, compatibility
-tests for every maintained SDK, and a documented deprecation window.
+tests for each maintained SDK, and a documented deprecation window.
 
-The `sdk-contract-server` fixture and SDK CI jobs exercise the same operation
-across Go, Python, TypeScript, and Rust. Adapter conformance tests cover the
-native, HTTP, MCP, GraphQL, gRPC, CLI, and Weft paths and compare the selected operation version,
-decision, filtered output, and execution outcome.
+## Audit event schema
+
+Audit events have their own `schema_version`, independent of the Loom protocol version and operation version. Consumers must preserve unknown fields and branch only on documented stable fields such as `event_type`, `decision`, `outcome`, `step`, and `reason`. Additive audit fields are backward compatible; removals or semantic changes require a new audit schema version.
+
+## Conformance coverage
+
+The repository's adapter conformance tests compare native, HTTP, MCP, GraphQL,
+gRPC, CLI, and Weft paths. SDK contract tests exercise the same operation
+through Go, Python, TypeScript, and Rust clients and compare identity, boundary,
+operation version, decision, filtered output, outcome, and audit metadata.

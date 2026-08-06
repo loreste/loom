@@ -1,31 +1,35 @@
 # Tenant isolation reference
 
-This directory is a small reference for shared PostgreSQL tables. It shows the
+This directory is a small reference for shared PostgreSQL tables. It combines
 two controls that must agree:
 
 1. Loom resolves a verified tenant claim into the request boundary.
 2. PostgreSQL RLS limits rows using the same boundary inside a transaction.
 
-Apply [`rls.sql`](rls.sql) with a migration owner. Run the application with a
-role that does not own the table and does not have `BYPASSRLS`.
+Apply [`rls.sql`](rls.sql) with a migration owner. The application role should
+not own the table and must not have `BYPASSRLS`.
 
-Configure the application with `tenancy.NewResolver("tenant_id")` and a
-PostgreSQL pool using `RequireTenantContext: true`. Product handlers should use
-`BeginScoped`/`QueryScoped` and include the boundary in fixed parameterized
-queries. Free-form `db.query` should not be granted to end-user principals.
+Configure `tenancy.NewResolver("tenant_id")` and a database pool with
+`RequireTenantContext: true`. Handlers should use `BeginTenant` or
+`BeginScoped`, and fixed parameterized queries should include the boundary.
+Do not grant free-form `db.query` to ordinary tenant principals.
 
-With environment-driven database wiring, set
-`LOOM_APP_DB_REQUIRE_TENANT_RLS=true` and use a matching
-`LOOM_APP_DB_TENANT_SETTING` such as `app.tenant_id`.
+For environment-driven database wiring, set:
 
-The adversarial contract is:
+```bash
+export LOOM_APP_DB_REQUIRE_TENANT_RLS=true
+export LOOM_APP_DB_TENANT_SETTING=app.tenant_id
+```
+
+The reference contract is:
 
 - a principal in tenant A cannot read or write tenant B;
-- a missing or conflicting tenant claim is denied;
+- missing or conflicting tenant claims are denied;
 - a transaction cannot change its tenant setting after it begins;
 - a pool cannot be selected solely from caller input;
 - break-glass access is a separate approved operation; and
-- audit records contain the principal, resolved boundary, and `tenant_id`.
+- audit records contain the principal, resolved boundary, and tenant context.
 
-This reference complements, rather than replaces, database role restrictions,
-RLS, statement timeouts, connection limits, and application policy review.
+This example complements, rather than replaces, database roles, RLS,
+statement timeouts, connection limits, application policy review, and an
+independent security assessment.

@@ -1,25 +1,36 @@
 # SDK quick starts
 
-The SDKs are thin clients for Loom's HTTP adapter. They submit an operation,
-version, boundary, input, and credentials; the server remains responsible for
-authentication, policy, guardrails, approvals, quotas, idempotency, execution,
-filtering, and audit. SDKs do not add permissions.
+Loom SDKs are thin clients. They submit an operation, version, boundary, input,
+and credential to Loom; the server remains responsible for authentication,
+policy, guardrails, approvals, quotas, idempotency, execution, filtering, and
+audit. An SDK cannot add permissions.
 
-Start a development server from the repository:
+The Go SDK supports both local in-process calls and remote HTTP calls. The
+Weft SDK is an in-process Go adapter. Python, TypeScript/Node, and Rust call
+the HTTP adapter.
+
+## Start a development server
+
+From a Loom checkout:
 
 ```bash
-export LOOM_TOKEN="$(openssl rand -hex 24)"
+export LOOM_TOKEN="loom-dev-$(openssl rand -hex 24)"
+export LOOM_DEMO_TOKEN_ALICE="$LOOM_TOKEN"
 go run ./cmd/loom serve --addr=:8080
 ```
 
-Use a real token issued by your identity system outside development. The
-examples below assume `LOOM_TOKEN` and a running server.
+The development server seeds demo principals only for local use. Use a token
+issued by your identity system outside development.
 
 ## Go
 
+Use an exact release tag in a Go module:
+
 ```bash
-go get github.com/loreste/loom@v0.1.5
+go get github.com/loreste/loom@vX.Y.Z
 ```
+
+Remote HTTP client:
 
 ```go
 import (
@@ -30,98 +41,155 @@ import (
     loom "github.com/loreste/loom/sdk/go/loom"
 )
 
-ctx := context.Background()
 client := loom.NewHTTPClient("http://127.0.0.1:8080", os.Getenv("LOOM_TOKEN"))
-response, err := client.Call(ctx, core.Request{
-    Operation: "document.read", OperationVersion: "1", Boundary: "dev",
-    Credentials: core.Credentials{Scheme: "bearer", Token: os.Getenv("LOOM_TOKEN")},
-    Input: map[string]any{"id": "1"},
+response, err := client.Call(context.Background(), core.Request{
+    Operation:        "document.read",
+    OperationVersion: "1",
+    Boundary:         "dev",
+    Credentials:      core.Credentials{Scheme: "bearer", Token: os.Getenv("LOOM_TOKEN")},
+    Input:            map[string]any{"id": "1"},
 })
+if err != nil {
+    panic(err)
+}
+if !response.Allowed {
+    panic(response.Denial.Reason)
+}
 ```
 
-Use `loom.NewClient(app.Runtime)` for in-process Go calls so the same pipeline
-is used without opening a network listener.
+For in-process use, construct Loom with `app.New` and wrap its runtime:
 
-For Weft workflow steps, use the Weft SDK package. It is an in-process client
-over the same adapter and does not bypass Loom:
+```go
+client := loom.NewClient(app.Runtime)
+response := client.Call(ctx, request)
+```
+
+## Weft Go SDK
+
+The Weft SDK adapts workflow steps to the same runtime. It does not bypass
+authorization or create a separate policy path:
 
 ```go
 import loomweft "github.com/loreste/loom/sdk/go/weft"
 
 client := loomweft.New(app.Runtime)
 response, err := client.Invoke(ctx, loomweft.StepCall{
-    WorkflowID: "workflow-id", StepID: "step-id",
-    Operation: "document.read", OperationVersion: "1", Boundary: "dev",
-    BearerToken: os.Getenv("LOOM_TOKEN"), Input: map[string]any{"id": "1"},
+    WorkflowID:       "workflow-id",
+    StepID:           "step-id",
+    Operation:        "document.read",
+    OperationVersion: "1",
+    Boundary:         "dev",
+    BearerToken:      os.Getenv("LOOM_TOKEN"),
+    Input:            map[string]any{"id": "1"},
 })
 ```
 
 ## Python
 
+The Python package is currently installed from a Loom checkout:
+
 ```bash
-python -m pip install loom-sdk==0.1.5
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install ./sdk/python
 ```
 
 ```python
 import os
 
-from loom import Client
+from loom import Client, ResourceRef
 
-client = Client("http://127.0.0.1:8080", token=os.environ["LOOM_TOKEN"])
+client = Client(
+    base_url="http://127.0.0.1:8080",
+    token=os.environ["LOOM_TOKEN"],
+)
 response = client.call(
-    "document.read", operation_version="1", boundary="dev", input={"id": "1"}
+    "document.read",
+    operation_version="1",
+    boundary="dev",
+    resource=ResourceRef(type="document", id="1"),
+    input={"id": "1"},
 )
 if not response.allowed:
     raise RuntimeError(response.denial.hint if response.denial else "denied")
+print(response.output)
 ```
 
-## TypeScript and Node
+The client also exposes `manifest()`, `openapi()`, and `mcp()` for server
+discovery and protocol requests. Discovery does not grant access.
 
-The package requires Node 18 or newer. Browser-compatible callers import
-`Client`; Node applications should import the explicit `NodeClient` entry
-point.
+## TypeScript and Node.js
+
+The TypeScript package is currently installed and built from the checkout. It
+requires Node.js 18 or newer. Browser-compatible callers use `Client`; Node
+applications should import the explicit `NodeClient` entry point.
 
 ```bash
-npm install @loreste/loom-sdk@0.1.5
+cd sdk/typescript
+npm install
+npm run build
+npm test
 ```
+
+For an application outside the checkout, build the package in the checkout and
+then include its compiled `dist/` output through the application's workspace
+or package process. `npm install` alone does not create `dist/`.
 
 ```ts
 import { NodeClient } from "@loreste/loom-sdk/node";
 
-const client = new NodeClient("http://127.0.0.1:8080", process.env.LOOM_TOKEN);
+const token = process.env.LOOM_TOKEN;
+if (!token) throw new Error("LOOM_TOKEN is required");
+
+const client = new NodeClient("http://127.0.0.1:8080", token);
 const response = await client.call({
-  operation: "document.read", operationVersion: "1", boundary: "dev",
+  operation: "document.read",
+  operationVersion: "1",
+  boundary: "dev",
+  resource: { type: "document", id: "1" },
   input: { id: "1" },
 });
+if (!response.Allowed) {
+  throw new Error(response.Denial?.Hint ?? "denied");
+}
+console.log(response.Output);
 ```
-
-`NodeClient` uses Node's built-in `fetch`. A compatible `fetchImpl` can be
-provided for tests or older runtimes.
 
 ## Rust
 
+The Rust crate is currently used as a path dependency from a Loom checkout:
+
 ```toml
 [dependencies]
-loom-sdk = "0.1.5"
+loom-sdk = { path = "../loom/sdk/rust" }
 ```
 
 ```rust
+use loom_sdk::{Call, Client};
+
 let token = std::env::var("LOOM_TOKEN")?;
-let client = loom_sdk::Client::new("http://127.0.0.1:8080", token)?;
-let response = client.call(loom_sdk::Call {
+let client = Client::new("http://127.0.0.1:8080", token)?;
+let response = client.call(Call {
     operation: "document.read".into(),
     operation_version: Some("1".into()),
     boundary: "dev".into(),
     input: serde_json::json!({"id": "1"}),
-    resource: None, fields: None, idempotency_key: None,
-    approval_token: None, token: None, metadata: Default::default(),
+    resource: None,
+    fields: None,
+    idempotency_key: None,
+    approval_token: None,
+    token: None,
+    metadata: Default::default(),
     trace_id: None,
 }).await?;
 ```
 
-Every SDK exposes `Outcome`, `ExecutionID`, `OperationVersion`, and
-`ReliabilityWarning` when the server returns them. For
-`executed_unconfirmed`, query `GET /v1/executions/{execution_id}` or use the
-runtime status API, then reconcile with an explicit outcome before retrying a
-side-effecting call. `retry_recording` only retries durable recording; it
-never reruns the handler.
+## Reliability outcomes
+
+SDK responses expose the selected operation version, execution ID, outcome, and
+reliability warning when the server returns them. If the outcome is
+`executed_unconfirmed`, query `GET /v1/executions/{execution_id}` and reconcile
+the confirmed external result before retrying a side-effecting call.
+
+`retry_recording` retries durable recording only; it never reruns the business
+handler.

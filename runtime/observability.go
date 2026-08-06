@@ -15,14 +15,21 @@ import (
 // Prometheus, or their existing metrics system without adding a dependency to
 // the security core.
 type Observation struct {
-	Operation        string
-	Boundary         core.BoundaryID
-	Principal        core.PrincipalID
-	Decision         core.Decision
-	Reason           string
-	Step             string
-	Duration         time.Duration
-	IdempotentReplay bool
+	ExecutionID        string
+	TraceID            string
+	Operation          string
+	OperationVersion   string
+	Boundary           core.BoundaryID
+	Principal          core.PrincipalID
+	Decision           core.Decision
+	Outcome            core.Outcome
+	Reason             string
+	Step               string
+	Duration           time.Duration
+	IdempotentReplay   bool
+	AuditID            string
+	ReliabilityWarning string
+	Adapter            string
 }
 
 // Observer receives execution observations. Implementations must not panic;
@@ -52,6 +59,7 @@ type Metrics struct {
 	approvalRequired     int64
 	quotaRejected        int64
 	idempotencyConflicts int64
+	executedUnconfirmed  int64
 	byStage              map[string]int64
 	byReason             map[string]int64
 }
@@ -85,6 +93,9 @@ func (m *Metrics) Observe(o Observation) {
 			m.idempotencyConflicts++
 		}
 	}
+	if o.Outcome == core.OutcomeExecutedUnconfirmed {
+		m.executedUnconfirmed++
+	}
 	m.duration += o.Duration
 	if o.Step == "" {
 		o.Step = "unknown"
@@ -112,6 +123,7 @@ func (m *Metrics) Snapshot() map[string]any {
 		"approval_required":     m.approvalRequired,
 		"quota_rejected":        m.quotaRejected,
 		"idempotency_conflicts": m.idempotencyConflicts,
+		"executed_unconfirmed":  m.executedUnconfirmed,
 	}
 }
 
@@ -140,6 +152,7 @@ func (m *Metrics) Prometheus() string {
 	fmt.Fprintf(&b, "loom_execute_approval_required_total %d\n", m.approvalRequired)
 	fmt.Fprintf(&b, "loom_execute_quota_rejected_total %d\n", m.quotaRejected)
 	fmt.Fprintf(&b, "loom_execute_idempotency_conflicts_total %d\n", m.idempotencyConflicts)
+	fmt.Fprintf(&b, "loom_execute_executed_unconfirmed_total %d\n", m.executedUnconfirmed)
 
 	keys := make([]string, 0, len(m.byStage))
 	for key := range m.byStage {

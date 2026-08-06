@@ -1,6 +1,10 @@
 # Loom Python SDK
 
-## Install from a checkout
+This is a thin HTTP client for the Loom runtime. Authorization remains
+server-side; the SDK cannot grant permissions.
+
+The current repository release installs this package from a checkout rather
+than from PyPI:
 
 ```bash
 python3 -m venv .venv
@@ -8,30 +12,27 @@ python3 -m venv .venv
 python -m pip install ./sdk/python
 ```
 
-The client talks to a running Loom HTTP adapter; authorization remains
-server-side. See [`../../docs/INSTALL.md`](../../docs/INSTALL.md).
-
-Thin HTTP client for the Loom Universal Runtime. **All authorization happens server-side.**
+Start a development Loom HTTP adapter and set `LOOM_TOKEN` to the corresponding
+development principal token before running the example:
 
 ```python
-from loom import Client, ResourceRef
-
 import os
 
-c = Client(base_url="http://127.0.0.1:8080", token=os.environ["LOOM_TOKEN"])
-resp = c.call(
+from loom import Client, ResourceRef
+
+client = Client("http://127.0.0.1:8080", token=os.environ["LOOM_TOKEN"])
+response = client.call(
     "document.read",
+    operation_version="1",
     boundary="dev",
     resource=ResourceRef(type="document", id="1"),
     input={"id": "1"},
 )
-assert resp.allowed
-print(resp.output)
-
-# Agent discovery (server-enforced)
-print(c.manifest())                 # GET /.well-known/loom.json
-print(c.openapi())                   # capability-filtered OpenAPI
-specs = c.catalog_spec(boundary="dev")
-if not resp.allowed and resp.denial:
-    print(resp.denial.hint, resp.denial.retryable)
+if not response.allowed:
+    raise RuntimeError(response.denial.hint if response.denial else "denied")
+print(response.output)
 ```
+
+See [`../../docs/INSTALL.md`](../../docs/INSTALL.md) and
+[`../../docs/SDK.md`](../../docs/SDK.md) for setup, discovery, and reliability
+outcomes.

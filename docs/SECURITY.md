@@ -1,110 +1,63 @@
-# Loom security notes
+# Security notes
 
-Loom has been used internally for the past two months and is now being
-reviewed as an open-source project. This document describes the controls in
-the current repository and the responsibilities that remain with a deploying
-application.
-
-The current release uses exact `core.Money` values, validates declared output
-schemas after handlers return, and keeps input-field grants separate from
-output projection grants. If post-execution audit fails after a handler runs,
-Loom returns `executed_unconfirmed` with an `ExecutionID`; callers must
-reconcile before retrying a side-effecting operation.
+Loom has been used internally for roughly two months and is now being published as open source. This document describes controls present in the repository and the responsibilities that remain with the deploying application.
 
 ## Runtime guarantees
 
 - Decisions default to deny.
-- Authentication, delegation, tenant resolution, boundary membership, policy,
-  resources, guardrails, risk, idempotency, approvals, quotas, execution,
-  output filtering, and audit all run through one pipeline.
-- Enforcement errors and panics fail closed.
-- Approval tokens are hashed and consumed before handlers run.
-- Idempotency state is scoped by principal, boundary, operation, and key.
-- Caller-supplied bypass headers and body credentials do not grant privilege.
-- Audit input is recursively redacted by value and sensitive field name.
-- SQL rejects multi-statements, comments, DDL/admin statements, dangerous
-  constructs, and unallowlisted function calls. It is not a parser-grade
-  database sandbox.
-- Tenant-aware pools can require a PostgreSQL transaction-local RLS setting;
-  direct pooled queries and tenant-setting mutation are refused.
+- Authentication, delegation, tenant resolution, boundary membership, policy, resource access, input/output field authorization, guardrails, risk, idempotency, approvals, quotas, execution status, output filtering, and audit are part of one pipeline.
+- Panics and enforcement errors fail closed.
+- Approval tokens are stored as hashes and consumed before the handler runs.
+- Idempotency keys are scoped by principal, boundary, operation, selected operation version, and request fingerprint.
+- Caller-supplied bypass headers, body credentials, and adapter metadata do not grant privilege.
+- Audit input and metadata are redacted recursively; opaque secrets such as idempotency keys are represented by digests.
+- SQL rejects multi-statements, comments, DDL/admin statements, dangerous functions, and tables outside the configured allowlist.
+- Financial amounts use exact `core.Money` values rather than `float64`.
+- Declared input and output schemas use bounded Loom Schema validation; unsupported schema keywords fail closed.
+- Output is filtered and redacted before it is returned to the caller.
+- A side effect whose post-execution recording cannot be confirmed returns `executed_unconfirmed` with an execution ID rather than pretending the operation was an ordinary denial.
 
-## Transport requirements
+## Durable state
 
-The HTTP adapter only treats a client certificate as mTLS identity when the
-TLS connection has a verified chain. A fingerprint or presented certificate is
-not sufficient.
+Process-local stores are useful for development and tests. Production mode requires durable approval, quota, idempotency, execution-status, and audit components when registered operations need them.
 
-Production-like CLI serving requires TLS certificates for direct HTTP and gRPC
-listeners. TLS termination by a trusted proxy must be explicitly configured
-with `LOOM_TRUSTED_TLS_PROXY=true`; that proxy and its network boundary remain
-deployment responsibilities.
+- File-backed state is suitable for one node and survives process restart; it is not a multi-node coordination system.
+- PostgreSQL stores provide shared approval, audit, idempotency, policy, and execution-status state.
+- Redis provides shared quota state when configured.
+- Recovery workers claim leases and record completion; they never rerun the business handler.
 
-Metrics are protected by an explicit authorizer or must be deliberately marked
-public. Health endpoints are intentionally separate from authenticated
-operations.
+Configure durability based on the effects of registered operations. A read-only process may not need every stateful control, while a payment or provisioning operation needs the complete durable path.
 
-## Identity responsibilities
+## Database boundaries
 
-Loom authenticates credentials; it is not an identity provider. Production
-deployments should provide an OIDC/JWKS-backed verifier or another managed
-verifier with:
+The SQL guard is defense in depth, not a parser-grade database sandbox. Use restricted database roles, read-only credentials where appropriate, PostgreSQL RLS for shared tenant tables, tenant-bound transactions, statement timeouts, connection limits, and database-level audit logging. Never pass a raw `*sql.DB` into an application handler; use Loom's governed database registry and executor.
 
-- issuer and audience validation;
-- bounded key caching and rotation behavior;
-- algorithm and expiry restrictions;
-- explicit subject, service, and tenant claim mapping; and
-- a documented revocation strategy.
+## Identity boundaries
 
-The built-in HMAC and static verifiers are for controlled deployments,
-development, and tests. Development demo credentials are generated at startup
-or supplied explicitly through environment configuration. They are not
-production identity.
+Loom authenticates credentials but does not provide OIDC discovery, JWKS rotation, revocation, or enterprise identity lifecycle management. Inject an application verifier and configure issuer, audience, algorithms, key rotation, certificate rotation, claim mapping, and revocation behavior. The built-in HMAC verifier is intended for controlled deployments and tests. Demo principals are development credentials, not production identities.
 
-## Tenancy responsibilities
+See [`IDENTITY.md`](IDENTITY.md).
 
-Configure `tenancy.NewResolver` when a verified tenant claim must match the
-request boundary. For shared PostgreSQL tables, use `RequireTenantContext`,
-`BeginTenant`/`BeginScoped`, RLS, a non-owner role, and `FORCE ROW LEVEL
-SECURITY`. Loom boundary policy is not a substitute for database isolation.
-See [`TENANCY.md`](TENANCY.md) and the [tenant reference](../examples/tenancy/README.md).
+## Tenant boundaries
 
-## Production checklist
+Application-layer tenant resolution does not replace database isolation. Use verified tenant claims, `tenancy.NewResolver`, tenant-bound PostgreSQL transactions, and RLS for shared tables. Keep break-glass access separate, approved, and audited.
 
-```bash
-export LOOM_ENV=production
-export LOOM_DISABLE_DEMO_PRINCIPALS=true
-export LOOM_REQUIRE_DURABLE=true
-export LOOM_DATABASE_URL='postgres://managed-user@db/loom'
-export LOOM_REDIS_URL='redis://managed-redis/0'
-export LOOM_JWT_SECRET="$(openssl rand -hex 32)" # use your secret manager in production
-export LOOM_JWT_ISSUER='https://issuer.example'
-export LOOM_JWT_AUDIENCE='loom-api'
-export LOOM_TENANT_CLAIM=tenant_id # only for tenant-aware deployments
-# Either provide --tls-cert/--tls-key, or explicitly run behind a trusted TLS proxy.
-```
+See [`TENANCY.md`](TENANCY.md).
 
-Also use restricted database roles, RLS for shared tenant tables, statement
-timeouts, connection limits, network egress controls, and an operational audit
-sink. File-backed state is durable for a single node; it is not a distributed
-approval or idempotency store.
+## Network adapter boundaries
 
-PostgreSQL-backed execution status is the shared option for multiple replicas.
-File-backed execution, approval, and idempotency state is durable for a single
-node; it is not a distributed store.
+HTTP, MCP, GraphQL, gRPC, CLI, Weft, and worker paths are untrusted adapter boundaries. They must translate into the same runtime entry point. Do not add header or request-body bypasses. Protect `/metrics`, `/readyz`, execution status, reconciliation, and discovery surfaces according to their documented authentication requirements. Do not expose development configuration or demo credentials on a public network.
 
-The repository security workflow runs govulncheck, gosec, CodeQL, dependency
-review, secret scanning, container scanning, and SBOM generation.
+## Compliance logging boundary
 
-## Verification
+Loom provides structured decision and execution-lifecycle events with stable correlation IDs, operation versions, enforcement stages, outcomes, redacted fields, and payload digests. This supports review and incident correlation without turning the audit sink into a second unrestricted request-data store.
 
-Run:
+Configure durable audit storage for production. PostgreSQL and file-backed sinks still require deployment controls for encryption, access, backups, retention, tamper evidence, and archival. Export to an immutable archive when regulation or internal policy requires it. Audit failure on an allow path is surfaced as an uncertain outcome because the handler may already have caused a side effect; reconciliation APIs are part of recovery.
 
-```bash
-go vet ./...
-go test -race ./...
-go test -fuzz=FuzzExecute -fuzztime=15s ./runtime/
-```
+Metrics and application logs are supporting telemetry, not the authoritative security record. Do not put raw credentials, approval tokens, idempotency keys, SQL, request bodies, secret fields, or high-cardinality identifiers in logs, metrics, traces, or labels.
 
-The CI workflow also runs SDK tests and cross-SDK contract tests. The security
-workflow runs govulncheck, gosec, CodeQL, dependency review, secret scanning,
-container scanning, and SBOM generation.
+See [`OBSERVABILITY.md`](OBSERVABILITY.md).
+
+## Reporting a vulnerability
+
+Do not disclose a suspected vulnerability in a public issue. Use the repository's private security contact, include reproduction steps and impact, and avoid sending real credentials or customer data.

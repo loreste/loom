@@ -1,235 +1,152 @@
-# Building with Loom (no API required)
+# Embedding Loom
 
-## Goal
+Loom does not require an API server. The primary integration is an `app.App`
+embedded in a Go process. HTTP, MCP, GraphQL, gRPC, CLI, and Weft are optional
+edges over the same runtime.
 
-New to Loom? Install the CLI or module with [`INSTALL.md`](INSTALL.md), then
-use [`HOWTO.md`](HOWTO.md) for operation, SQL, job, approval, and observability
-recipes.
+## Product operations
 
-Ship product features with **identity, authorization, and safe database access** without designing a custom authz microservice or exposing SQL to clients.
-
-## Pattern A — Product operations (recommended)
-
-Callers never see SQL. Handlers use fixed parameterized statements via `db.Executor`.
+Register domain operations and keep SQL inside governed handlers:
 
 ```text
-client / worker
-    → app.Call("order.create", …)
-        → policy/authz
-        → handler uses Executor (fixed SQL)
+client or worker
+    → app.Call
+        → identity and policy gates
+        → handler using a governed Executor
         → database
 ```
 
-See `examples/orders-app/` and `domains/orders`.
+Callers should not receive raw database handles or construct SQL from request
+input. See `examples/orders-app/` and `domains/orders/`.
 
-## Pattern B — Governed SQL ops
-
-Power-user / admin tooling may use `db.query` / `db.exec` with:
-
-- capability `db.query` / `db.exec`
-- policy allow rules
-- resource ACL on `db:<pool>`
-- SQL classifier (no multi-statement, comments, DDL, …)
-- optional table allowlist
-
-See `examples/embed/`.
-
-## Pattern C — Optional network edge
-
-When you need remote callers, attach HTTP:
-
-```bash
-go run ./cmd/loom serve --addr=:8080
-```
-
-Same `Runtime.Execute` path. Remote SDKs cannot grant themselves power.
-
-### Discovery (optional network edge)
-
-Clients can discover how to call a Loom service without a hand-rolled API catalog:
-
-1. `GET /.well-known/loom.json` — static discovery (unauthenticated; no operation list).
-2. `GET /v1/openapi.json` — OpenAPI 3 filtered to the caller's capabilities.
-3. `catalog.spec` via `POST /v1/execute` — tool-style specs (schema, risk, approval,
-   idempotency) for ops the caller can use.
-4. Optionally `POST /mcp` for `tools/list` + `tools/call` (same pipeline).
-5. Invoke via `POST /v1/execute`. Denials use stable `reason` codes plus optional
-   `hint` / `retryable`; internal detail stays in audit only.
-
-
-## Connecting databases
-
-| Driver | Import | `OpenDB` driver name |
-|--------|--------|----------------------|
-| Postgres | `_ "github.com/jackc/pgx/v5/stdlib"` | `pgx` |
-| SQLite (pure Go) | `_ "modernc.org/sqlite"` | `sqlite` |
+## Minimal embedded construction
 
 ```go
-a.OpenDB("primary", "pgx", os.Getenv("DATABASE_URL"), db.Options{
+a, err := app.New(app.Config{})
+if err != nil {
+    return err
+}
+
+if err := a.Register(operation, handler); err != nil {
+    return err
+}
+
+response := a.Call(ctx, core.Request{
+    Operation:   "order.create",
+    Credentials: core.Credentials{Scheme: "bearer", Token: token},
+    Boundary:    "dev",
+    Input:       map[string]any{"sku": "SKU-1"},
+})
+```
+
+Grant the principal, operation policy, resource access, and field access
+explicitly. A zero-value or missing rule does not allow the request.
+
+## Governed SQL operations
+
+Administrative or controlled tooling can use `db.query` or `db.exec` when all
+of these are configured:
+
+- the capability is granted explicitly;
+- policy and resource access allow the pool;
+- the SQL guard accepts the statement; and
+- the pool table allowlist contains every referenced table.
+
+Prefer fixed domain operations for product callers.
+
+## Database registration
+
+| Database | Import | `OpenDB` driver |
+| --- | --- | --- |
+| PostgreSQL | `_ "github.com/jackc/pgx/v5/stdlib"` | `pgx` |
+| SQLite | `_ "modernc.org/sqlite"` | `sqlite` |
+
+```go
+_ = a.OpenDB("primary", "pgx", os.Getenv("DATABASE_URL"), db.Options{
     AllowedTables:     []string{"public.orders", "public.order_items"},
-    AllowedBoundaries: []core.BoundaryID{"prod"},
     StatementTimeout:  5 * time.Second,
     MaxRows:           500,
     ReadOnly:          false,
 })
 ```
 
-**Migrations / DDL** run at process startup on `*sql.DB` *before* registering with Loom (DDL is blocked in app SQL path by design).
+Run migrations at startup before registering the application SQL path. DDL is
+blocked in the governed request path by design:
 
 ```go
-mig := db.NewMigrator(sqldb, db.DialectSQLite) // or DialectPostgres
-_ = mig.Apply(ctx, orders.Migrations())
-a.DBs.RegisterDB("main", sqldb, db.Options{DriverName: "sqlite", AllowedTables: []string{"orders"}})
-```
-
-### Placeholders
-
-Write SQL with `?`. Loom rebinds automatically:
-
-| Dialect | Driver examples | Bound form |
-|---------|-----------------|------------|
-| SQLite | `sqlite` | `?` |
-| Postgres | `pgx`, `postgres` | `$1`, `$2`, … |
-
-```go
-// works on both after Rebind inside Executor
-ex.Exec(ctx, `INSERT INTO orders (sku) VALUES (?)`, sku)
-```
-
-### One-shot bootstrap
-
-```go
-res, err := app.Bootstrap(ctx, app.BootstrapConfig{
-    DB: &config.AppDB{
-        URL: "file:app.db", Driver: "sqlite", Pool: "main",
-        Tables: []string{"orders"}, Boundaries: []core.BoundaryID{"dev"},
-    },
-    Migrations: orders.Migrations(),
-    Setup: func(a *app.App, pool string) error {
-        return orders.Register(a.Registry, orders.Deps{DBs: a.DBs, Pool: pool})
-    },
-    Users: []app.SeedUser{{
-        ID: "svc:api", Token: token, Home: "dev",
-        Caps: []string{"order.create", "order.read"},
-        Ops: []app.SeedOp{{
-            Op: "order.create", ResType: "order", ResID: "*",
-            Fields: []string{"id", "customer", "sku", "qty", "status", "created_at"},
-        }},
-    }},
-})
-defer res.App.Close()
-```
-
-Or set `OpenDBFromEnv: true` to load `LOOM_APP_DB_*`.
-
-### Worker processes & job queue
-
-Long-running workers use the same embed path — see `examples/worker/`.
-
-```go
-// In-process FIFO
-q := job.NewMemoryQueue()
-// Durable SQLite/Postgres (approval tokens are never persisted)
-q, _ := job.NewSQLQueue(ctx, sqldb, job.SQLQueueOptions{Dialect: db.DialectSQLite})
-
-_ = q.Enqueue(ctx, job.Job{ID: "1", Operation: "order.create", Boundary: "dev", Input: ...})
-runner := &job.Runner{Queue: q, Caller: app, Token: serviceToken}
-_ = runner.Run(ctx) // each job → app.Call (full pipeline)
-```
-
-Jobs are **not** a privilege bypass: denied ops still deny.
-
-### Optional adapters (same pipeline)
-
-| Edge | Path / API | Notes |
-|------|------------|--------|
-| HTTP | `POST /v1/execute` | Primary remote surface |
-| MCP | `POST /mcp` | JSON-RPC tools/list + tools/call |
-| GraphQL | `POST /graphql` | `mutation { execute(input: …) }` |
-| gRPC | `loom.v1.Runtime/Execute` | Proto in `adapters/grpc/proto` |
-| Weft | in-process adapter | Optional |
-
-None of these can bypass `Runtime.Execute`.
-
-### MCP wire (optional agent edge)
-
-JSON-RPC 2.0 tools/list + tools/call over stdio **or** `POST /mcp` on the HTTP edge — same pipeline:
-
-```go
-srv := &mcp.Server{
-    Adapter: mcp.New(a.Runtime), Registry: a.Registry, Verifier: a.Verifier,
-    Token: os.Getenv("LOOM_TOKEN"), Boundary: "dev",
+mig := db.NewMigrator(sqldb, db.DialectPostgres)
+if err := mig.Apply(ctx, migrations); err != nil {
+    return err
 }
-_ = srv.ServeStream(ctx, os.Stdin, os.Stdout)
 ```
 
-When serving HTTP via `cmd/loom serve` / platform CLI, `POST /mcp` and
-`GET /v1/openapi.json` are wired automatically.
+Use `?` placeholders in application SQL; Loom rebinds them for PostgreSQL.
 
-`tools/list` and OpenAPI are capability-filtered (empty tool paths without a valid bearer).
-`tools/call` never bypasses `Runtime.Execute`.
+## One-shot bootstrap
 
-### OpenAPI export
+`app.Bootstrap` can migrate a configured application database, register domain
+operations, and seed least-privilege development users. See the complete
+example in `examples/orders-app/main.go` and the environment-driven database
+settings in the source comments for `app.OpenDBFromEnv`.
 
-```go
-specs := catalog.Build(reg, catalog.ForCapabilities(id.Capabilities))
-doc := catalog.OpenAPI("loom", specs, catalog.OpenAPIOptions{ServerURL: "https://api.example"})
-// or: GET /v1/openapi.json with Authorization: Bearer …
-```
+## Background jobs
 
-Each op becomes `POST /ops/{name}` with `x-loom-*` governance metadata. Sensitive field **names** never appear.
+Use `job.Runner` with an in-memory, SQLite, or PostgreSQL queue. Queue delivery
+is not a privilege path; every job becomes an `app.Call` and passes the full
+pipeline. Approval tokens are not persisted by the job queue.
 
-### App database from env
+## Optional network edges
 
-```bash
-export LOOM_APP_DB_URL='postgres://user:pass@localhost/app?sslmode=disable'
-export LOOM_APP_DB_DRIVER=pgx          # optional; guessed from URL
-export LOOM_APP_DB_POOL=main
-export LOOM_APP_DB_TABLES=orders,order_items
-export LOOM_APP_DB_BOUNDARIES=prod
-```
+| Edge | Path or API | Notes |
+| --- | --- | --- |
+| HTTP | `POST /v1/execute` | Primary remote surface |
+| MCP | `POST /mcp` | JSON-RPC `tools/list` and `tools/call` |
+| GraphQL | `POST /graphql` | `execute` mutation |
+| gRPC | `loom.v1.Runtime/Execute` | Proto under `adapters/grpc/proto` |
+| Weft | in-process | Workflow step adapter |
 
-```go
-_ = a.OpenDBFromEnv() // no-op if LOOM_APP_DB_URL unset
-```
+None of these edges can bypass `Runtime.Execute`.
 
-### InsertReturning
+## Discovery
 
-```go
-row, err := ex.InsertReturning(ctx, db.InsertOpts{
-    Table: "orders",
-    Columns: []string{"customer", "sku", "qty", "status", "created_at"},
-    Values: []any{...},
-    Returning: []string{"id", "customer", "sku"},
-})
-// Postgres: INSERT … RETURNING; SQLite: insert + last_insert_rowid()
-```
+The HTTP adapter provides:
+
+1. `GET /.well-known/loom.json` for static service discovery;
+2. `GET /v1/openapi.json` for capability-filtered OpenAPI; and
+3. `catalog.spec` through the execution path for governed operation metadata.
+
+OpenAPI and MCP descriptions are projections of the caller's capabilities.
+They are not authorization decisions and can change when policy changes.
 
 ## Production embedded construction
 
-Use `app.Config.Environment="production"` together with injected durable
-approval, quota, idempotency, and audit implementations and an explicit
-`IdentityVerifier`. `RequireDurableSecurityState` can be set independently for
-staging checks. `app.New` rejects process-local implementations in that mode;
-it does not silently upgrade memory state or invent identity configuration.
+Use `Environment: "production"` with an injected identity verifier and durable
+implementations appropriate to the registered operation effects. Set
+`RequireDurableSecurityState: true` when startup must reject process-local
+security stores. `app.New` does not silently replace production dependencies
+with memory implementations.
 
-The application owns the concrete OIDC/JWKS or mTLS verifier and the mapping
-from identity claims to boundaries. See [`IDENTITY.md`](IDENTITY.md) and
-[`COMPATIBILITY.md`](COMPATIBILITY.md) before exposing an adapter.
+For a multi-node deployment, use the PostgreSQL bundle for approvals,
+idempotency, execution status, and audit, and Redis for shared quotas where
+needed. See [`INSTALL.md`](INSTALL.md), [`IDENTITY.md`](IDENTITY.md), and
+[`COMPATIBILITY.md`](COMPATIBILITY.md).
 
-## Minimal secure checklist
+## Secure embedding checklist
 
-1. `app.New` — deny by default  
-2. `AddUser` with least-privilege capabilities  
-3. `GrantOp` / `GrantDBAccess` — explicit allows  
-4. Register domain ops or `EnableDBOps`  
-5. Every side effect through `a.Call`  
-6. Audit sink in production (`AuditSink` or platform file/Postgres)  
-7. Multi-tenant data: pool-per-tenant, RLS, or product SQL that always filters by boundary — see [`TENANCY.md`](TENANCY.md)
+1. Construct an app with deny-by-default behavior.
+2. Inject a production identity verifier.
+3. Register operations with exact versions and bounded schemas.
+4. Grant least-privilege policy, resource, and field access.
+5. Use governed database executors and tenant-bound transactions.
+6. Require idempotency and durable execution status for side effects.
+7. Configure approval and audit storage for high-risk operations.
+8. Protect operational endpoints and export safe metrics.
+9. Add adversarial tests for every new control.
 
-## What not to do
+## Avoid
 
-- Don’t pass `*sql.DB` into request handlers from globals  
-- Don’t concatenate user input into SQL  
-- Don’t grant `db.query` to product clients if they should only call `order.*`  
-- Don’t set `AllowAnonymous: true` in production  
+- passing a raw `*sql.DB` into request handlers;
+- concatenating user input into SQL;
+- granting `db.query` to callers that only need a domain operation;
+- trusting caller-supplied tenant or identity metadata; or
+- enabling anonymous access or demo principals in production.

@@ -1,122 +1,92 @@
 # Why Loom exists
 
-Loom has been used internally for the past two months. We are now publishing
-it as open source so the implementation, examples, and trade-offs can be
-reviewed by other teams. The current release is v0.1.5 and remains an early
-release; production identity, deployment, and database isolation still belong
-to the integrating application.
+Loom has been used internally for the past two months. We are publishing it as
+open source so the implementation, examples, and trade-offs can be inspected,
+adopted, and improved by other teams.
 
 Loom is an embed-first governance runtime for Go applications. It gives an
 application one controlled execution path for operations that can change data,
-move money, affect access, or trigger external side effects.
-
-An operation might be a product action such as `order.create`, a database
-query, a background job, a payment, a provisioning request, or an
-administrative action. Loom evaluates the request before the handler or
-database executor runs it. The same decision path can be reached from in-process
-Go code or through HTTP, MCP, GraphQL, gRPC, and Weft adapters.
-
-## From internal use to open source
-
-Loom has been used internally for the past two months to address these
-governance and security problems in real application workflows. We are now
-open-sourcing it so the implementation can be inspected, adopted by other
-teams, and improved in the open. The v0.1.5 release is an early public release:
-the core runtime is substantial, while packaging, production integrations, and
-documentation will continue to mature with community use.
+move money, affect access, or trigger an external side effect.
 
 ## The problem
 
-As an application grows, sensitive work usually becomes reachable through more
-than one path:
+The same sensitive operation often enters through several surfaces:
 
-- an HTTP endpoint for the web application;
-- a worker that retries a job later;
+- an HTTP endpoint;
+- a background worker retrying a job;
 - an administrative CLI;
-- an MCP or GraphQL tool;
-- an internal service using gRPC; and
-- code that runs directly inside the process.
+- an MCP, GraphQL, or gRPC tool;
+- an internal service; or
+- code running directly inside the process.
 
-Without a shared enforcement point, each path tends to grow its own combination
-of authentication, authorization, tenant checks, input validation, approval
-logic, and audit events. That creates security drift:
+Without a shared execution boundary, applications commonly accumulate
+inconsistent rules:
 
 - one adapter checks a permission while another forgets it;
-- a worker can perform an operation that the HTTP path denies;
-- product code reaches a database directly and bypasses policy;
+- a worker can perform an operation rejected by the HTTP path;
+- product code reaches a database without policy or tenant checks;
 - retries duplicate payments or other side effects;
-- approval tokens are reused under concurrency;
-- tenant context is lost between the request and the database; and
-- operators cannot tell why a request was denied.
+- approval tokens can be reused under concurrency; and
+- operators cannot tell which check caused a denial.
 
-The result is not only a security problem. It is also a maintenance problem:
-teams repeatedly design and test the same authorization boundary while the
-number of callers continues to increase.
+## Why an application needs a runtime
 
-## Why an application like Loom is needed
-
-Loom makes the execution boundary explicit. Application code registers named
-operations and their handlers, then calls `app.Call` or `Runtime.Execute`.
-Adapters translate external requests into that call; they do not implement a
-second authorization system.
-
-This gives teams a consistent place to apply controls that are otherwise easy
-to omit:
+An identity provider answers who a caller is. An application policy system
+answers what that identity may do. Loom covers the execution boundary between
+that decision and the side effect:
 
 ```text
 caller or adapter
-        |
-        v
-identity → boundary → operation policy → resource policy → context policy
-        → guardrails → risk/approval → idempotency → quota
-        → handler or governed database executor → output filtering → audit
+  → verified identity and delegation
+  → tenant/boundary resolution
+  → operation and resource policy
+  → input-field permissions and contextual policy
+  → guardrails, risk, approval, idempotency, and quota
+  → handler or governed database executor
+  → output validation, filtering, redaction, status, and audit
 ```
 
-The default is deny. Unknown operations, missing rules, invalid boundaries,
-failed verification, and enforcement errors fail closed. Single-use approvals
-are consumed before side effects, idempotency protects retries, and governed
-database access applies conservative SQL checks in addition to database-level
-controls.
+The default is deny. The runtime treats an unknown operation, missing policy,
+invalid boundary, failed guardrail, or internal enforcement error as a denial.
+Adapters cannot skip a stage or grant themselves a capability.
 
-## What Loom is for
+## What Loom provides
 
-Loom is a good fit when an application needs several of these at once:
+- an embedded authorization and execution pipeline;
+- a versioned operation registry;
+- tenant and boundary checks;
+- resource and input/output field authorization;
+- guarded database access;
+- risk, approval, quota, and idempotency controls;
+- exact financial values and declared currency policy;
+- output schema validation, filtering, and secret redaction;
+- durable execution status and reconciliation hooks; and
+- audit and metrics hooks.
 
-- one authorization model across synchronous requests and background work;
-- explicit tenant or boundary enforcement;
-- controlled access to application databases;
-- approvals for high-risk actions;
-- quotas and replay protection;
-- consistent output filtering and secret redaction; and
-- an audit trail and operational view of decisions.
+HTTP, MCP, GraphQL, gRPC, CLI, Weft, workers, and in-process Go calls are
+adapters or callers of the same runtime. They are not separate authorization
+implementations.
 
-Typical governed operations include customer-data access, telecom
-provisioning, credit or payment changes, account administration, data exports,
-and agent-accessible tools.
+## What Loom does not provide
 
-## What Loom is not
+Loom is not an identity provider, OIDC discovery service, ORM, payment
+processor, or database-isolation guarantee. Production applications still need
+an identity integration, secret management, restricted database roles,
+PostgreSQL RLS where appropriate, tenant-bound transactions, durable storage,
+and operational monitoring.
 
-Loom is not an identity provider, an OAuth/OIDC service, an ORM, or a guarantee
-of tenant isolation by itself. Production deployments still need a real
-identity verifier, restricted database roles, PostgreSQL RLS or equivalent
-isolation, timeouts, connection limits, durable security state, and operational
-monitoring.
+The current release includes a built-in HMAC JWT verifier and mTLS verifier,
+but OIDC discovery, JWKS rotation, certificate lifecycle, and revocation remain
+application integration responsibilities.
 
-Loom governs what happens after a caller presents an identity. It does not
-invent an application's domain model or replace careful database and network
-design.
+## From internal use to open source
 
-## The design goal
+The internal deployment gave Loom two months of practical use across governed
+operations, database access, workers, and protocol adapters. The public release
+is intentionally matter-of-fact: the runtime and test suite are substantial,
+while production identity and deployment choices remain visible integration
+work rather than hidden assumptions.
 
-The goal is simple: sensitive application operations should have one obvious,
-testable, observable path from caller to side effect. Adding a new protocol or
-worker should add a translation layer, not a new privilege path.
-
-Continue with:
-
-- [`INSTALL.md`](INSTALL.md) for building Loom, installing a release, using
-  Docker, or adding an SDK;
-- [`HOWTO.md`](HOWTO.md) for operation, database, approval, job, and observability
-  recipes;
-- [`EMBED.md`](EMBED.md) for the in-process API; and
-- [`SECURITY.md`](SECURITY.md) for the security model and production limits.
+See [`VERSION`](../VERSION) for the version source of truth and the
+[GitHub releases](https://github.com/loreste/loom/releases) for published
+artifacts.
