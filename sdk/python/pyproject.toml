@@ -1,6 +1,6 @@
 [project]
 name = "loom-sdk"
-version = "0.1.5"
+version = "0.1.6"
 description = "Loom Universal Runtime Python SDK (HTTP client)"
 readme = "README.md"
 requires-python = ">=3.10"

@@ -4,6 +4,13 @@ All notable changes to Loom are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and releases use
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.6] — 2026-08-05
+
+### Added
+
+- Structured compliance audit events with execution and trace correlation, operation-version binding, redacted payloads, digests, lifecycle events, and PostgreSQL persistence.
+- Metrics for `executed_unconfirmed` outcomes and operational documentation for audit retention, access control, export, and reconciliation.
+
 ## [0.1.5] — 2026-08-05
 
 ### Fixed
@@ -22,11 +29,6 @@ All notable changes to Loom are documented here. The format follows
 - PostgreSQL recovery queue claims, leases, release, retention, and archival.
 - File-store reload, recovery-queue, concurrent-reconciliation, deep-copy, and
   failed-write tests.
-- Structured compliance audit events with execution and trace correlation,
-  operation-version binding, redacted payloads, digests, lifecycle events,
-  and PostgreSQL persistence.
-- Metrics for `executed_unconfirmed` outcomes and operational documentation
-  for audit retention, access control, export, and reconciliation.
 - CI vulnerability, static-analysis, CodeQL, dependency-review, secret-scan,
   container-scan, and SBOM workflows.
 
