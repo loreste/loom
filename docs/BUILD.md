@@ -68,6 +68,28 @@ an exact asset for supported Linux and macOS hosts.
 The workflow does not publish Python, npm, or Rust packages. Those SDKs are
 installed from a checkout until package publication is added deliberately.
 
+## Security gates
+
+The security workflows are merge and release gates:
+
+- `govulncheck` fails on findings or scan errors;
+- `gosec`, CodeQL, secret scanning, and dependency review are blocking;
+- the release SBOM is generated with every tagged release; and
+- Trivy blocks fixed HIGH and CRITICAL container findings on pull requests,
+  main-branch changes, version tags, Docker/dependency changes, and the weekly
+  scheduled scan.
+
+Unfixed Trivy findings are still visible but are not treated as a release gate
+until a fix exists. Review the scan output and track the exception rather than
+silently suppressing it.
+
+Before publishing a container from an organization registry, require the
+tagged container-scan workflow to pass for the exact commit and image build
+inputs. The repository does not publish a default image itself.
+
+Performance and failure-injection evidence is recorded in
+[`PERFORMANCE.md`](PERFORMANCE.md) and [`FAILURE-INJECTION.md`](FAILURE-INJECTION.md).
+
 ## Build metadata
 
 The CLI accepts link-time values for version, commit, and build date. A normal

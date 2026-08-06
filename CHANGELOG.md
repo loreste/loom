@@ -4,6 +4,37 @@ All notable changes to Loom are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and releases use
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.7] — 2026-08-05
+
+### Added
+
+- Official lease-based recovery worker that verifies uncertain external effects,
+  retries durable recording, reconciles execution status, and escalates work
+  that remains uncertain without rerunning business handlers.
+- Tamper-evident audit hash chains, signed checkpoints, verification helpers,
+  and PostgreSQL persistence for event hashes, named streams, sequence numbers,
+  checkpoint IDs, and shared chain-head locking.
+- Performance benchmark and failure-injection evidence with reproducible
+  commands and deployment measurement guidance.
+
+### Changed
+
+- Execution creation is immutable: duplicate IDs fail, terminal completion is
+  an explicit store transition, and reconciled records cannot move backwards.
+- Security checks are blocking gates; container scanning runs on relevant code
+  changes, version tags, scheduled scans, and manual runs.
+- Go 1.26.5, pgx/v5 5.9.2, and x/text 0.39.0 address the vulnerabilities
+  identified by the blocking dependency scan.
+- Documentation now covers recovery operations, integrity verification,
+  performance measurement, failure injection, and current release behavior.
+
+### Fixed
+
+- PostgreSQL execution inserts can no longer replace an existing execution or
+  clear its recovery lease through `Put`.
+- File, memory, and PostgreSQL execution stores preserve caller isolation and
+  reject unsafe state transitions.
+
 ## [0.1.6] — 2026-08-05
 
 ### Added

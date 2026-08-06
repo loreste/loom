@@ -46,9 +46,35 @@ type Record struct {
 type Store interface {
 	Durable() bool
 	Put(context.Context, Record) error
+	// Complete is the explicit terminal transition for an inserted record.
+	// Put never replaces an existing execution record.
+	Complete(context.Context, Record) error
 	Get(context.Context, string) (Record, bool, error)
 	Reconcile(context.Context, string, core.Outcome, string) (Record, error)
 	MarkRecoveryQueued(context.Context, string) (Record, error)
+}
+
+// CompleteRecord validates the only allowed transition from a pending
+// execution to a terminal outcome. Reconciliation is a separate transition.
+func CompleteRecord(previous, updated Record) (Record, error) {
+	if previous.ExecutionID != updated.ExecutionID {
+		return Record{}, fmt.Errorf("execution: completion identity mismatch")
+	}
+	if previous.State == StateReconciled {
+		return Record{}, fmt.Errorf("%w: execution %s is already reconciled", core.ErrAlreadyExists, previous.ExecutionID)
+	}
+	if previous.State != StatePending {
+		return Record{}, fmt.Errorf("%w: execution %s cannot transition from %s", core.ErrAlreadyExists, previous.ExecutionID, previous.State)
+	}
+	if updated.State != StateAllowed && updated.State != StateDenied && updated.State != StateExecutedUnconfirmed {
+		return Record{}, fmt.Errorf("execution: invalid completion state %s", updated.State)
+	}
+	if previous.Operation != updated.Operation || previous.OperationVersion != updated.OperationVersion || previous.Principal != updated.Principal || previous.Boundary != updated.Boundary || previous.IdempotencyKey != updated.IdempotencyKey || previous.Fingerprint != updated.Fingerprint {
+		return Record{}, fmt.Errorf("execution: immutable execution fields changed")
+	}
+	updated.StartedAt = previous.StartedAt
+	updated.UpdatedAt = time.Now().UTC()
+	return cloneRecord(updated), nil
 }
 
 // RecoveryLease is a time-bounded claim on an execution whose durable

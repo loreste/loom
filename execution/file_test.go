@@ -2,6 +2,7 @@ package execution
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -56,6 +57,46 @@ func TestFileStoreReconcilePersistsAcrossReload(t *testing.T) {
 	}
 	if !ok || persisted.State != StateReconciled || persisted.Outcome != core.OutcomeAllowed || !persisted.Response.Allowed {
 		t.Fatalf("reconciliation was not persisted: %+v, found=%v", persisted, ok)
+	}
+}
+
+func TestFileStorePutIsImmutableAndCompletePersistsAcrossReload(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "execution.json")
+	store, err := NewFileStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := Record{
+		ExecutionID:      "immutable-file",
+		Operation:        "profile.update",
+		OperationVersion: "1",
+		Outcome:          core.OutcomeDenied,
+		State:            StatePending,
+		Response:         core.Response{Outcome: core.OutcomeDenied, ExecutionID: "immutable-file"},
+	}
+	if err := store.Put(context.Background(), record); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Put(context.Background(), record); !errors.Is(err, core.ErrAlreadyExists) {
+		t.Fatalf("duplicate Put error = %v, want ErrAlreadyExists", err)
+	}
+	completed := record
+	completed.Outcome = core.OutcomeAllowed
+	completed.State = StateAllowed
+	completed.Response = core.Response{Outcome: core.OutcomeAllowed, Allowed: true, ExecutionID: record.ExecutionID}
+	if err := store.Complete(context.Background(), completed); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := NewFileStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := reopened.Get(context.Background(), record.ExecutionID)
+	if err != nil || !ok {
+		t.Fatalf("reloaded execution: record=%+v found=%v err=%v", got, ok, err)
+	}
+	if got.State != StateAllowed || got.Outcome != core.OutcomeAllowed || !got.Response.Allowed {
+		t.Fatalf("unexpected reloaded completed record: %+v", got)
 	}
 }
 

@@ -125,9 +125,28 @@ ALTER TABLE loom_audit ADD COLUMN IF NOT EXISTS quota_state TEXT NOT NULL DEFAUL
 ALTER TABLE loom_audit ADD COLUMN IF NOT EXISTS reliability_warning TEXT NOT NULL DEFAULT '';
 ALTER TABLE loom_audit ADD COLUMN IF NOT EXISTS adapter TEXT NOT NULL DEFAULT '';
 ALTER TABLE loom_audit ADD COLUMN IF NOT EXISTS prior_audit_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE loom_audit ADD COLUMN IF NOT EXISTS prev_event_hash TEXT NOT NULL DEFAULT '';
+ALTER TABLE loom_audit ADD COLUMN IF NOT EXISTS event_hash TEXT NOT NULL DEFAULT '';
+ALTER TABLE loom_audit ADD COLUMN IF NOT EXISTS audit_stream TEXT NOT NULL DEFAULT 'default';
+ALTER TABLE loom_audit ADD COLUMN IF NOT EXISTS sequence_no BIGINT;
+ALTER TABLE loom_audit ADD COLUMN IF NOT EXISTS checkpoint_id TEXT NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS idx_loom_audit_execution ON loom_audit (execution_id);
 CREATE INDEX IF NOT EXISTS idx_loom_audit_operation ON loom_audit (operation, operation_version);
 CREATE INDEX IF NOT EXISTS idx_loom_audit_decision_reason ON loom_audit (decision, reason);
+CREATE INDEX IF NOT EXISTS idx_loom_audit_event_hash ON loom_audit (event_hash);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_loom_audit_stream_sequence
+    ON loom_audit (audit_stream, sequence_no)
+    WHERE sequence_no IS NOT NULL;
+
+-- PostgreSQL owns one chain head per named stream. Audit inserts lock and
+-- advance this row in the same transaction as the event insert.
+CREATE TABLE IF NOT EXISTS loom_audit_chain_heads (
+    stream_id      TEXT PRIMARY KEY,
+    next_sequence  BIGINT NOT NULL CHECK (next_sequence > 0),
+    head_hash      TEXT NOT NULL DEFAULT '',
+    checkpoint_id  TEXT NOT NULL DEFAULT '',
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 
 -- Distributed policy documents (replace semantics by version).
 CREATE TABLE IF NOT EXISTS loom_policy (

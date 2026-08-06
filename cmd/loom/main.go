@@ -18,7 +18,7 @@ import (
 //
 // Default matches VERSION file when not injected (dev builds).
 var (
-	version = "0.1.6"
+	version = "0.1.7"
 	commit  = "unknown"
 	date    = "unknown"
 )

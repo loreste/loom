@@ -45,6 +45,51 @@ Use the sink appropriate to the deployment:
 
 In production, configure a durable audit sink and export it to an access-controlled, append-only or WORM-capable destination when required by policy. The database table or JSONL file alone is not automatically an immutable compliance archive.
 
+## Tamper-evident audit streams
+
+Wrap the selected sink with `audit.NewHashChainSink` when the deployment needs
+to detect modification or deletion inside the audit store:
+
+```go
+sink := audit.NewHashChainSink(durableSink, previousCheckpointHash)
+logger := audit.NewLogger(sink)
+```
+
+Each event contains `prev_event_hash` and `event_hash`. The chain advances only
+after the underlying sink accepts the event. On restart, load the last hash
+from a trusted checkpoint or start a deliberately separate chain; never infer
+it from untrusted log input.
+
+Verify exported events before using them as compliance evidence:
+
+```go
+if err := audit.VerifyChain(events, trustedPreviousHash); err != nil {
+    return fmt.Errorf("audit integrity check failed: %w", err)
+}
+if err := audit.VerifyCheckpoint(events, checkpoint, signer); err != nil {
+    return fmt.Errorf("audit checkpoint check failed: %w", err)
+}
+```
+
+`audit.CreateCheckpoint` produces a signed terminal hash when supplied with a
+caller-managed signer. The included HMAC helper requires a 32-byte key and is
+appropriate only when the key is managed separately. Regulated deployments
+should use a KMS/HSM-backed `audit.CheckpointSigner`, store checkpoints in an
+access-controlled immutable location, restrict direct database writes, and
+retain WORM/object-storage exports according to policy. Hash chaining detects
+tampering; it does not make a mutable database immutable by itself.
+
+`audit.HashChainSink` coordinates its chain head with a mutex inside one
+process. It is suitable for one writer per stream only; multiple replicas can
+otherwise create branches if they start from the same previous hash. For
+multi-node deployments, use `store/postgres.NewAuditSinkForStream` with a
+stable stream ID. PostgreSQL then owns `loom_audit_chain_heads`, assigns
+sequence numbers under `SELECT ... FOR UPDATE`, verifies the previous hash,
+enforces unique `(audit_stream, sequence_no)`, and records the active
+checkpoint ID. Use `AuditSink.RotateStream` for a checkpoint/rotation and
+`AuditSink.ChainHead` when exporting the trusted head. Do not wrap a
+coordinated PostgreSQL sink in a separate process-local hash chain.
+
 ## Correlation workflow
 
 Use `execution_id` for one governed attempt and `trace_id` for the request or distributed trace. The response includes both the execution ID and audit ID when available. For a replay, `prior_audit_id` links the replay event to the original audit event.

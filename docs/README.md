@@ -31,6 +31,9 @@ each task.
 | --- | --- |
 | Metrics, tracing, and safe telemetry | [`OBSERVABILITY.md`](OBSERVABILITY.md) |
 | Production runbook and failure handling | [`OPERATIONS.md`](OPERATIONS.md) |
+| Execution recovery worker and reconciliation | [`RECOVERY.md`](RECOVERY.md) |
+| Performance benchmark and measurement guidance | [`PERFORMANCE.md`](PERFORMANCE.md) |
+| Failure-injection scenarios and results | [`FAILURE-INJECTION.md`](FAILURE-INJECTION.md) |
 | Local checks and release artifacts | [`BUILD.md`](BUILD.md) |
 | Release history | [`../CHANGELOG.md`](../CHANGELOG.md) |
 
