@@ -89,7 +89,7 @@ jobs:
           output-file: loom-sbom.cdx.json
           upload-artifact: true
 
-  container:
+  container_scan:
     name: container-scan
     runs-on: ubuntu-latest
     timeout-minutes: 20
