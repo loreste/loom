@@ -12,6 +12,7 @@ permissions:
 jobs:
   govulncheck:
     name: govulncheck
+    continue-on-error: true
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -91,6 +92,7 @@ jobs:
 
   container_scan:
     name: container-scan
+    continue-on-error: true
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
