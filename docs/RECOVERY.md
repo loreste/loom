@@ -86,8 +86,11 @@ conflicts, verification failures, and reconciliations by operation.
 ## Operational safeguards
 
 - Give every worker a stable, unique owner name.
-- Keep leases shorter than the maximum time a provider lookup can take, or
-  renew leases in the deployment layer.
+- Set the lease longer than the worst-case verification, durable-recording,
+  and reconciliation duration with a safety margin, or implement lease
+  renewal/heartbeat before the lease can expire. Without renewal, a lease that
+  expires while verification is still running can be claimed by another
+  worker.
 - Require idempotency for side-effecting operations.
 - Do not retry the original handler from the worker.
 - Stop automated client retries while an execution is uncertain.

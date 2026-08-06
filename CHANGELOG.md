@@ -12,7 +12,8 @@ All notable changes to Loom are documented here. The format follows
   retries durable recording, reconciles execution status, and escalates work
   that remains uncertain without rerunning business handlers.
 - Tamper-evident audit hash chains, signed checkpoints, verification helpers,
-  and PostgreSQL persistence for event hashes.
+  and PostgreSQL persistence for event hashes, named streams, sequence numbers,
+  checkpoint IDs, and shared chain-head locking.
 - Performance benchmark and failure-injection evidence with reproducible
   commands and deployment measurement guidance.
 

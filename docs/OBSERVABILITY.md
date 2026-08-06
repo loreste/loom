@@ -79,6 +79,17 @@ access-controlled immutable location, restrict direct database writes, and
 retain WORM/object-storage exports according to policy. Hash chaining detects
 tampering; it does not make a mutable database immutable by itself.
 
+`audit.HashChainSink` coordinates its chain head with a mutex inside one
+process. It is suitable for one writer per stream only; multiple replicas can
+otherwise create branches if they start from the same previous hash. For
+multi-node deployments, use `store/postgres.NewAuditSinkForStream` with a
+stable stream ID. PostgreSQL then owns `loom_audit_chain_heads`, assigns
+sequence numbers under `SELECT ... FOR UPDATE`, verifies the previous hash,
+enforces unique `(audit_stream, sequence_no)`, and records the active
+checkpoint ID. Use `AuditSink.RotateStream` for a checkpoint/rotation and
+`AuditSink.ChainHead` when exporting the trusted head. Do not wrap a
+coordinated PostgreSQL sink in a separate process-local hash chain.
+
 ## Correlation workflow
 
 Use `execution_id` for one governed attempt and `trace_id` for the request or distributed trace. The response includes both the execution ID and audit ID when available. For a replay, `prior_audit_id` links the replay event to the original audit event.

@@ -74,6 +74,12 @@ type Event struct {
 	// PriorAuditID links a replay event to the original execution's audit ID.
 	// It is persisted by the JSONL, memory, and PostgreSQL sinks.
 	PriorAuditID string `json:"prior_audit_id,omitempty"`
+	// AuditStream, Sequence, and CheckpointID identify the tamper-evident
+	// stream assigned by a coordinated durable sink. They remain empty for
+	// legacy or process-local sinks.
+	AuditStream  string `json:"audit_stream,omitempty"`
+	Sequence     int64  `json:"sequence,omitempty"`
+	CheckpointID string `json:"checkpoint_id,omitempty"`
 	// PrevEventHash and EventHash make an audit stream tamper-evident when the
 	// sink is wrapped with HashChainSink. They are empty for unchained events.
 	PrevEventHash string `json:"prev_event_hash,omitempty"`

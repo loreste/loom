@@ -294,6 +294,86 @@ func TestPostgresExecutionReconcileAndRecoveryLease(t *testing.T) {
 	}
 }
 
+func TestPostgresAuditChainHeadIsSharedAcrossSinks(t *testing.T) {
+	ctx := context.Background()
+	b, err := postgres.NewBundle(ctx, dsn(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = b.Close() })
+	stream := "pg-audit-chain-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+	left := postgres.NewAuditSinkForStream(b.DB, stream)
+	right := postgres.NewAuditSinkForStream(b.DB, stream)
+	const count = 12
+	errs := make(chan error, count)
+	var wg sync.WaitGroup
+	for i := 0; i < count; i++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			sink := left
+			if index%2 == 1 {
+				sink = right
+			}
+			errs <- sink.Write(ctx, audit.Event{
+				ID:        stream + "-event-" + strconv.Itoa(index),
+				Timestamp: time.Now().UTC(),
+				Decision:  "deny",
+				Operation: "chain.test",
+			})
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for writeErr := range errs {
+		if writeErr != nil {
+			t.Fatal(writeErr)
+		}
+	}
+
+	rows, err := b.DB.QueryContext(ctx, `
+		SELECT sequence_no, prev_event_hash, event_hash
+		FROM loom_audit WHERE audit_stream = $1 ORDER BY sequence_no
+	`, stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var expected int64 = 1
+	lastHash := ""
+	for rows.Next() {
+		var sequence int64
+		var previousHash, eventHash string
+		if err := rows.Scan(&sequence, &previousHash, &eventHash); err != nil {
+			t.Fatal(err)
+		}
+		if sequence != expected {
+			t.Fatalf("sequence=%d, want %d", sequence, expected)
+		}
+		if previousHash != lastHash {
+			t.Fatalf("sequence %d previous hash=%q, want %q", sequence, previousHash, lastHash)
+		}
+		if eventHash == "" {
+			t.Fatalf("sequence %d has empty event hash", sequence)
+		}
+		lastHash = eventHash
+		expected++
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if expected != count+1 {
+		t.Fatalf("stored %d events, want %d", expected-1, count)
+	}
+	next, head, _, err := left.ChainHead(ctx, stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next != count+1 || head != lastHash {
+		t.Fatalf("chain head next=%d hash=%q, want next=%d hash=%q", next, head, count+1, lastHash)
+	}
+}
+
 // TestPostgresMigrateRefusesDowngrade: a database stamped with a newer schema
 // version must refuse migration; a corrupt version string must error too
 // (never silently treated as 0).
