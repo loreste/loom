@@ -35,6 +35,40 @@ CREATE TABLE IF NOT EXISTS loom_idempotency (
 
 CREATE INDEX IF NOT EXISTS idx_loom_idempotency_expires ON loom_idempotency (expires_at);
 
+-- Durable execution status and recovery coordination. Response contains only
+-- caller-safe output; raw request input is intentionally not stored here.
+CREATE TABLE IF NOT EXISTS loom_executions (
+    execution_id          TEXT PRIMARY KEY,
+    operation             TEXT NOT NULL,
+    operation_version     TEXT NOT NULL,
+    principal             TEXT NOT NULL DEFAULT '',
+    boundary              TEXT NOT NULL DEFAULT '',
+    outcome               TEXT NOT NULL,
+    state                 TEXT NOT NULL,
+    response              JSONB NOT NULL,
+    idempotency_key       TEXT NOT NULL DEFAULT '',
+    fingerprint           TEXT NOT NULL DEFAULT '',
+    recovery_queued       BOOLEAN NOT NULL DEFAULT FALSE,
+    reconciliation_note   TEXT NOT NULL DEFAULT '',
+    started_at            TIMESTAMPTZ NOT NULL,
+    updated_at            TIMESTAMPTZ NOT NULL,
+    revision              BIGINT NOT NULL DEFAULT 1,
+    recovery_lease_id     TEXT,
+    recovery_lease_owner  TEXT,
+    recovery_lease_until  TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_loom_executions_recovery
+    ON loom_executions (recovery_queued, recovery_lease_until);
+CREATE INDEX IF NOT EXISTS idx_loom_executions_updated
+    ON loom_executions (updated_at DESC);
+
+-- Archive keeps terminal execution history separate from the hot status table.
+-- Applications can export this table to their long-term retention system.
+CREATE TABLE IF NOT EXISTS loom_execution_archive (LIKE loom_executions INCLUDING ALL);
+CREATE INDEX IF NOT EXISTS idx_loom_execution_archive_updated
+    ON loom_execution_archive (updated_at DESC);
+
 CREATE TABLE IF NOT EXISTS loom_audit (
     id          TEXT PRIMARY KEY,
     ts          TIMESTAMPTZ NOT NULL,

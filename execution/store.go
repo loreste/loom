@@ -51,6 +51,23 @@ type Store interface {
 	MarkRecoveryQueued(context.Context, string) (Record, error)
 }
 
+// RecoveryLease is a time-bounded claim on an execution whose durable
+// completion record still needs asynchronous recovery.
+type RecoveryLease struct {
+	Record    Record
+	Owner     string
+	LeaseID   string
+	ExpiresAt time.Time
+}
+
+// RecoveryQueue is implemented by stores that can coordinate recovery work
+// across workers. ClaimRecovery must return at most one live lease for a
+// record; ReleaseRecovery keeps the item queued when completed is false.
+type RecoveryQueue interface {
+	ClaimRecovery(context.Context, string, time.Duration) (RecoveryLease, bool, error)
+	ReleaseRecovery(context.Context, string, string, bool) error
+}
+
 // StateFor converts a response into its persisted lifecycle state.
 func StateFor(response core.Response) State {
 	if response.Outcome == core.OutcomeExecutedUnconfirmed {
@@ -80,4 +97,76 @@ func validateReconciliation(outcome core.Outcome) error {
 		return fmt.Errorf("execution: reconciliation outcome must be allowed or denied")
 	}
 	return nil
+}
+
+// cloneRecord protects store state from callers mutating reference-backed
+// response values after Put or Get. Execution output is JSON-shaped, so maps
+// and slices are copied recursively without changing scalar types.
+func cloneRecord(record Record) Record {
+	record.Response.Output = cloneMap(record.Response.Output)
+	if record.Response.Denial != nil {
+		denial := *record.Response.Denial
+		if denial.Details != nil {
+			denial.Details = make(map[string]string, len(denial.Details))
+			for key, value := range record.Response.Denial.Details {
+				denial.Details[key] = value
+			}
+		}
+		record.Response.Denial = &denial
+	}
+	return record
+}
+
+func cloneMap(input map[string]any) map[string]any {
+	if input == nil {
+		return nil
+	}
+	output := make(map[string]any, len(input))
+	for key, value := range input {
+		output[key] = cloneValue(value)
+	}
+	return output
+}
+
+func cloneValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return cloneMap(typed)
+	case []any:
+		output := make([]any, len(typed))
+		for index, item := range typed {
+			output[index] = cloneValue(item)
+		}
+		return output
+	case []string:
+		return append([]string(nil), typed...)
+	case []map[string]any:
+		output := make([]map[string]any, len(typed))
+		for index, item := range typed {
+			output[index] = cloneMap(item)
+		}
+		return output
+	default:
+		return value
+	}
+}
+
+func reconcileRecord(record Record, outcome core.Outcome, note string) (Record, error) {
+	if record.State == StateReconciled {
+		if record.Outcome != outcome {
+			return Record{}, fmt.Errorf("%w: execution %s already reconciled with outcome %s", core.ErrAlreadyExists, record.ExecutionID, record.Outcome)
+		}
+		return cloneRecord(record), nil
+	}
+	if record.State != StateExecutedUnconfirmed {
+		return Record{}, fmt.Errorf("execution: %s is not awaiting reconciliation", record.ExecutionID)
+	}
+	record.Outcome = outcome
+	record.State = StateReconciled
+	record.Response.Outcome = outcome
+	record.Response.Allowed = outcome == core.OutcomeAllowed
+	record.Response.ReliabilityWarning = ""
+	record.ReconciliationNote = note
+	record.UpdatedAt = time.Now().UTC()
+	return cloneRecord(record), nil
 }

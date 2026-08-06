@@ -135,6 +135,8 @@ func (q *SQLQueue) Enqueue(ctx context.Context, j Job) error {
 		resID = j.Resource.ID
 	}
 	idem := j.IdempotencyKey
+	// #nosec G201 -- q.table is restricted to a simple identifier in
+	// NewSQLQueue before it is retained by the queue.
 	sqlStr := fmt.Sprintf(
 		`INSERT INTO %s (id, operation, boundary, input_json, resource_type, resource_id, idempotency_key, status)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')`, q.table)

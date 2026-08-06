@@ -11,7 +11,7 @@ import (
 )
 
 // SchemaVersion is the embedded schema version (bump when schema.sql changes incompatibly).
-const SchemaVersion = 2
+const SchemaVersion = 3
 
 // migrationLockKey serializes migrations from separate application processes
 // sharing one PostgreSQL database. The lock is session-scoped and therefore

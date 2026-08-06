@@ -1,0 +1,21 @@
+name: dependency-review
+
+on:
+  pull_request:
+    branches: [main, master]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  review:
+    name: dependency-review
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # GitHub may return a service error when dependency graph data is not
+      # enabled for a repository. Keep the review visible without blocking
+      # unrelated CI; Dependabot and govulncheck remain active gates.
+      - uses: actions/dependency-review-action@v4
+        continue-on-error: true

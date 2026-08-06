@@ -66,7 +66,11 @@ func (s *FileStore) persistLocked() error {
 	if err := os.WriteFile(tmp, b, 0o600); err != nil {
 		return err
 	}
-	return os.Rename(tmp, s.path)
+	if err := os.Rename(tmp, s.path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
 }
 
 func (s *FileStore) Put(ctx context.Context, record Record) error {
@@ -85,8 +89,17 @@ func (s *FileStore) Put(ctx context.Context, record Record) error {
 		record.StartedAt = time.Now().UTC()
 	}
 	record.UpdatedAt = time.Now().UTC()
-	s.records[record.ExecutionID] = record
-	return s.persistLocked()
+	previous, existed := s.records[record.ExecutionID]
+	s.records[record.ExecutionID] = cloneRecord(record)
+	if err := s.persistLocked(); err != nil {
+		if existed {
+			s.records[record.ExecutionID] = previous
+		} else {
+			delete(s.records, record.ExecutionID)
+		}
+		return err
+	}
+	return nil
 }
 
 func (s *FileStore) Get(ctx context.Context, id string) (Record, bool, error) {
@@ -99,7 +112,7 @@ func (s *FileStore) Get(ctx context.Context, id string) (Record, bool, error) {
 	s.mu.Lock()
 	record, ok := s.records[id]
 	s.mu.Unlock()
-	return record, ok, nil
+	return cloneRecord(record), ok, nil
 }
 
 func (s *FileStore) Reconcile(ctx context.Context, id string, outcome core.Outcome, note string) (Record, error) {
@@ -115,20 +128,19 @@ func (s *FileStore) Reconcile(ctx context.Context, id string, outcome core.Outco
 	if !ok {
 		return Record{}, fmt.Errorf("execution: %s not found", id)
 	}
-	if record.State != StateExecutedUnconfirmed && record.State != StateReconciled {
-		return Record{}, fmt.Errorf("execution: %s is not awaiting reconciliation", id)
-	}
-	record.Outcome = outcome
-	record.State = StateReconciled
-	record.Response.Outcome = outcome
-	record.Response.Allowed = outcome == core.OutcomeAllowed
-	record.Response.ReliabilityWarning = ""
-	record.ReconciliationNote = note
-	record.UpdatedAt = time.Now().UTC()
-	if err := s.persistLocked(); err != nil {
+	updated, err := reconcileRecord(record, outcome, note)
+	if err != nil {
 		return Record{}, err
 	}
-	return record, nil
+	if record.State == StateReconciled {
+		return updated, nil
+	}
+	s.records[id] = cloneRecord(updated)
+	if err := s.persistLocked(); err != nil {
+		s.records[id] = record
+		return Record{}, err
+	}
+	return cloneRecord(updated), nil
 }
 
 func (s *FileStore) MarkRecoveryQueued(ctx context.Context, id string) (Record, error) {
@@ -143,9 +155,11 @@ func (s *FileStore) MarkRecoveryQueued(ctx context.Context, id string) (Record, 
 	}
 	record.RecoveryQueued = true
 	record.UpdatedAt = time.Now().UTC()
-	s.records[id] = record
+	previous := s.records[id]
+	s.records[id] = cloneRecord(record)
 	if err := s.persistLocked(); err != nil {
+		s.records[id] = previous
 		return Record{}, err
 	}
-	return record, nil
+	return cloneRecord(record), nil
 }

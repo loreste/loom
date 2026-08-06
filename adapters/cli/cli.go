@@ -423,6 +423,7 @@ func loadServerTLS(certFile, keyFile, clientCA string, requireMTLS bool) (*tls.C
 		cfg.Certificates = []tls.Certificate{cert}
 	}
 	if clientCA != "" {
+		// #nosec G304 -- clientCA is an explicit operator-provided TLS path.
 		pem, err := os.ReadFile(clientCA)
 		if err != nil {
 			return nil, err

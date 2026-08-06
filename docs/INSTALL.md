@@ -37,7 +37,7 @@ exact release tag; it does not guess a version.
 
 ```bash
 export LOOM_REPOSITORY=loreste/loom
-export LOOM_VERSION=v0.1.4
+export LOOM_VERSION=v0.1.5
 curl --fail --location https://raw.githubusercontent.com/${LOOM_REPOSITORY}/${LOOM_VERSION}/scripts/install.sh | sh
 ~/.local/bin/loom version
 ```
@@ -62,7 +62,7 @@ configuration are supplied at runtime.
 ## Add Loom to a Go application
 
 ```bash
-go get github.com/loreste/loom@v0.1.4
+go get github.com/loreste/loom@v0.1.5
 ```
 
 Use the embed API to register operations, identities, boundaries, policies,
@@ -119,6 +119,11 @@ For tenant-aware JWTs, also set `LOOM_TENANT_CLAIM` to the verified claim that
 carries the tenant identifier. Loom maps it to the request boundary before
 authorization; configure the application database with the tenant-bound
 options described in [TENANCY.md](TENANCY.md).
+
+When `LOOM_DATA_DIR` is used for a single-node deployment, Loom stores
+approvals, idempotency state, execution status, and audit records under that
+directory. For multiple replicas, use `LOOM_DATABASE_URL`; the PostgreSQL
+bundle includes the durable execution-status and recovery store.
 
 See [IDENTITY.md](IDENTITY.md) for OIDC/JWKS and mTLS integration, and
 [TENANCY.md](TENANCY.md) plus the [tenant reference](../examples/tenancy/README.md)

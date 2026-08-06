@@ -5,6 +5,22 @@ All notable changes to Loom are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.5] — 2026-08-05
+
+### Fixed
+
+- File-backed execution reconciliation now writes the updated record before persistence.
+- Failed file-store writes roll back the in-memory mutation and leave the last durable state intact.
+- Memory and file execution stores deep-copy caller-visible response maps and slices.
+- Reconciliation is idempotent for repeated confirmations and rejects contradictory outcomes.
+
+### Added
+
+- PostgreSQL execution-status storage with revision-checked reconciliation.
+- PostgreSQL recovery queue claims, lease ownership, expiry, release, and retention purge.
+- File-store reload, recovery-queue, concurrent reconciliation, deep-copy, and failed-write tests.
+- CI govulncheck, gosec, CodeQL, dependency review, secret scanning, container scanning, and SBOM jobs.
+
 ## [0.1.4] — 2026-08-05
 
 ### Added

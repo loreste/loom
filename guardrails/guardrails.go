@@ -551,17 +551,22 @@ func parseHostIP(h string) (netip.Addr, bool) {
 		if nums[i] > 255 {
 			return netip.Addr{}, false
 		}
+		// #nosec G115 -- each component is checked to fit one byte above.
 		addr |= uint32(nums[i]) << uint(24-8*i)
 	}
 	last := nums[len(nums)-1]
 	remBytes := 4 - (len(nums) - 1)
 	if remBytes >= 4 {
 		// single component is the full 32-bit address; ParseUint already capped it
+		// #nosec G115 -- ParseUint is capped at 32 bits and this is the
+		// single-component inet_aton form.
 		addr |= uint32(last)
 	} else {
+		// #nosec G115 -- remBytes is bounded to 1..3 by the branch above.
 		if last >= uint64(1)<<uint(8*remBytes) {
 			return netip.Addr{}, false
 		}
+		// #nosec G115 -- the range check above bounds the conversion.
 		addr |= uint32(last)
 	}
 	return netip.AddrFrom4([4]byte{byte(addr >> 24), byte(addr >> 16), byte(addr >> 8), byte(addr)}), true

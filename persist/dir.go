@@ -13,6 +13,7 @@ import (
 const (
 	FileApprovals   = "approvals.json"
 	FileIdempotency = "idempotency.json"
+	FileExecution   = "executions.json"
 	FileAuditJSONL  = "audit.jsonl"
 	DirTLS          = "tls"
 )
@@ -26,6 +27,7 @@ func EnsureDir(root string) error {
 		return err
 	}
 	// MkdirAll does not tighten a pre-existing loose directory.
+	// #nosec G302 -- this is a private directory, not a regular file.
 	return os.Chmod(root, 0o700)
 }
 
