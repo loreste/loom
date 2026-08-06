@@ -23,7 +23,7 @@ All notable changes to Loom are documented here. The format follows
   an explicit store transition, and reconciled records cannot move backwards.
 - Security checks are blocking gates; container scanning runs on relevant code
   changes, version tags, scheduled scans, and manual runs.
-- Go 1.26.5, pgx/v5 5.9.2, and x/text 0.39.0 address the vulnerabilities
+- Go 1.26.5, pgx/v5 5.9.2, x/crypto 0.52.0, and x/text 0.39.0 address the vulnerabilities
   identified by the blocking dependency scan.
 - Documentation now covers recovery operations, integrity verification,
   performance measurement, failure injection, and current release behavior.
