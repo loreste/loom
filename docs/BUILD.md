@@ -1,8 +1,7 @@
 # Build and release
 
-Loom can be embedded without a separate service. The repository also builds a
-CLI, a Docker image, cross-platform release binaries, and SDK packages from the
-source tree.
+Loom can be embedded without a separate service. The repository also builds the
+CLI, container, cross-platform release binaries, and SDKs from the source tree.
 
 ## Local checks
 
@@ -12,21 +11,23 @@ make test-race
 make vet
 make build
 make fuzz FUZZ_TIME=15s
+go mod verify
+go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+go run github.com/securego/gosec/v2/cmd/gosec@v2.22.8 -exclude-dir=adapters/grpc/gen ./...
 ```
 
-The `sdk` Make target is informational; language-specific SDK checks are run by
-the CI workflow and are documented in the SDK READMEs.
+The `sdk` Make target is informational. Language-specific SDK checks run in CI
+and are documented under `sdk/`.
 
-## Build a release binary
+## Build release binaries
 
-The root [`VERSION`](../VERSION) file is the default version source. Build all
-release targets locally with:
+The root [`VERSION`](../VERSION) file is the default version source:
 
 ```bash
 make release
 ```
 
-Artifacts are written to `dist/` as:
+Artifacts are written to `dist/`:
 
 ```text
 loom-VERSION-linux-amd64
@@ -35,19 +36,39 @@ loom-VERSION-darwin-amd64
 loom-VERSION-darwin-arm64
 loom-VERSION-windows-amd64.exe
 loom-VERSION-windows-arm64.exe
+SHA256SUMS
 ```
 
 Override `LOOM_VERSION`, `LOOM_COMMIT`, `LOOM_BUILD_DATE`, `DIST_DIR`, or
-`VERSION_FILE` when a build pipeline supplies those values. Set `GOOS`,
-`GOARCH`, or `LOOM_TARGETS` to build a smaller target set.
+`VERSION_FILE` when a build pipeline supplies them. Set `GOOS`, `GOARCH`, or
+`LOOM_TARGETS` for a smaller target set. Runtime credentials, database URLs,
+identity configuration, tenant policy, and application secrets are never
+embedded in release artifacts.
 
-Runtime credentials, database URLs, identity configuration, tenant policy, and
-application secrets are never embedded in release artifacts.
+## Verify an installed release
+
+The installer requires an exact release tag and verifies the downloaded binary
+against the release's `SHA256SUMS` file:
+
+```bash
+LOOM_REPOSITORY=loreste/loom \
+LOOM_VERSION=v0.1.7 \
+  sh scripts/install.sh
+```
+
+For independent verification, download the binary and checksum manifest from
+the release page and run:
+
+```bash
+sha256sum -c SHA256SUMS --ignore-missing
+```
+
+Release binaries also have keyless Cosign bundles and GitHub build-provenance
+attestations. Verify those with the trust policy required by your organization
+before promoting an artifact into production. An application may additionally
+require a pinned signing identity and OIDC issuer for Cosign verification.
 
 ## Docker image
-
-The Dockerfile builds the CLI with CGO disabled and runs it as a non-root user
-from a distroless base image:
 
 ```bash
 docker build \
@@ -55,43 +76,37 @@ docker build \
   -t loom:local .
 ```
 
-The repository does not publish a default container image. Use an organization
-registry and signing policy when distributing the image.
+The image builds the CLI with CGO disabled and runs as a non-root user from a
+distroless base image. It contains no demo credentials or application secrets.
+The repository does not publish a default container image; an organization
+should apply its own registry, signing, retention, and deployment policy.
 
 ## GitHub release workflow
 
-Pushing a tag matching `v*` runs the release workflow. It builds Linux, macOS,
-and Windows binaries for amd64 and arm64, creates a CycloneDX SBOM, and attaches
-the assets to a GitHub release. The installer in `scripts/install.sh` downloads
-an exact asset for supported Linux and macOS hosts.
+Pushing a tag matching `v*` runs the release workflow. It:
 
-The workflow does not publish Python, npm, or Rust packages. Those SDKs are
-installed from a checkout until package publication is added deliberately.
+1. verifies the tag points at its exact commit;
+2. waits for successful `ci`, `security`, and `container-scan` workflows for
+   that same commit;
+3. builds Linux, macOS, and Windows binaries for amd64 and arm64;
+4. creates a CycloneDX SBOM and SHA-256 checksum manifest;
+5. creates keyless Cosign signature bundles and build-provenance attestations;
+6. publishes all release evidence with the GitHub release.
+
+The workflow does not publish Python, npm, or Rust packages. SDK publication
+is a separate adoption phase and must use exact version alignment and registry
+provenance.
 
 ## Security gates
 
-The security workflows are merge and release gates:
-
-- `govulncheck` fails on findings or scan errors;
-- `gosec`, CodeQL, secret scanning, and dependency review are blocking;
-- the release SBOM is generated with every tagged release; and
-- Trivy blocks fixed HIGH and CRITICAL container findings on pull requests,
-  main-branch changes, version tags, Docker/dependency changes, and the weekly
-  scheduled scan.
-
-Unfixed Trivy findings are still visible but are not treated as a release gate
-until a fix exists. Review the scan output and track the exception rather than
-silently suppressing it.
-
-Before publishing a container from an organization registry, require the
-tagged container-scan workflow to pass for the exact commit and image build
-inputs. The repository does not publish a default image itself.
-
-Performance and failure-injection evidence is recorded in
-[`PERFORMANCE.md`](PERFORMANCE.md) and [`FAILURE-INJECTION.md`](FAILURE-INJECTION.md).
+The merge and release gates include blocking govulncheck, gosec, CodeQL, secret
+scanning, dependency review, SDK validation, PostgreSQL integration, adapter
+contract tests, SBOM generation, and container scanning. Unfixed container
+findings are not silently suppressed; the scan fails on configured HIGH and
+CRITICAL findings and remains visible for scheduled review.
 
 ## Build metadata
 
 The CLI accepts link-time values for version, commit, and build date. A normal
-development build uses the root `VERSION` value for its default version and
-reports `unknown` for metadata that was not supplied by the build pipeline.
+development build reports `unknown` for metadata that was not supplied by the
+build pipeline.

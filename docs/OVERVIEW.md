@@ -69,15 +69,15 @@ implementations.
 
 ## What Loom does not provide
 
-Loom is not an identity provider, OIDC discovery service, ORM, payment
+Loom is not an identity provider, managed tenant directory, ORM, payment
 processor, or database-isolation guarantee. Production applications still need
-an identity integration, secret management, restricted database roles,
+explicit identity configuration, secret management, restricted database roles,
 PostgreSQL RLS where appropriate, tenant-bound transactions, durable storage,
 and operational monitoring.
 
-The current release includes a built-in HMAC JWT verifier and mTLS verifier,
-but OIDC discovery, JWKS rotation, certificate lifecycle, and revocation remain
-application integration responsibilities.
+The current release includes HMAC, mTLS, and an embeddable OIDC/JWKS verifier.
+Issuer and audience configuration, certificate lifecycle, revocation, and
+provider-specific claim mapping remain application integration responsibilities.
 
 ## From internal use to open source
 

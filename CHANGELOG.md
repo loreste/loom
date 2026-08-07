@@ -4,6 +4,24 @@ All notable changes to Loom are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and releases use
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Embeddable OIDC discovery and JWKS verification with exact issuer and
+  audience validation, explicit algorithm allowlists, bounded token and
+  upstream response sizes, configurable claim mapping, optional introspection,
+  and non-sensitive verifier health counters.
+- OIDC adversarial tests covering claim validation, key rotation, tenant
+  mismatches, introspection failure, and oversized JWKS responses.
+- Recovery workers now support lease heartbeats, bounded scheduled retries,
+  attempt tracking, deduplicated escalation, and operator-review dead letters;
+  PostgreSQL persists the scheduling state.
+- Releases now include checksum manifests, keyless artifact signatures,
+  provenance attestations, and an exact-commit CI gate. The installer verifies
+  checksums before installation, and all workflow actions are pinned to commit
+  SHAs with Dependabot monitoring.
+
 ## [0.1.7] — 2026-08-05
 
 ### Added

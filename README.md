@@ -69,9 +69,11 @@ Loom keeps credentials, approval tokens, idempotency keys, raw SQL, and unrestri
 
 ## What Loom is not
 
-Loom is not an identity provider, OIDC discovery service, ORM, or complete
-tenant-isolation solution. It authenticates credentials presented by an
-application-provided verifier and then applies policy to the verified identity.
+Loom is not an identity provider, managed tenant directory, ORM, payment
+processor, or complete tenant-isolation solution. It includes an embeddable
+OIDC/JWKS verifier, but the application still supplies issuer, audience, claim
+mapping, revocation, and tenant configuration before Loom applies policy to the
+verified identity.
 Production deployments still need an identity integration, durable state,
 database isolation, secrets management, and operational monitoring.
 
@@ -82,8 +84,9 @@ operations that application should expose.
 
 The version in [`VERSION`](VERSION) is the release source of truth. See the
 [release page](https://github.com/loreste/loom/releases) for published binary
-assets. This is an early public release; production identity integration and
-database isolation remain responsibilities of the integrating application.
+assets. The release includes the production OIDC verifier, while database
+isolation, provider lifecycle, secret management, and operational monitoring
+remain responsibilities of the integrating application.
 
 ## Quick start
 

@@ -3,6 +3,7 @@ package recovery_test
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -92,5 +93,158 @@ func TestWorkerLeavesUnconfirmedRecordQueuedAndEscalates(t *testing.T) {
 	result, err := worker.ProcessOne(context.Background())
 	if err != nil || !result.Escalated || !queue.released || queue.queued == false || !escalated {
 		t.Fatalf("result=%+v err=%v queue=%+v escalated=%v", result, err, queue, escalated)
+	}
+}
+
+type scheduledQueue struct {
+	mu          sync.Mutex
+	record      execution.Record
+	claimed     bool
+	queued      bool
+	renewals    int
+	scheduledAt time.Time
+	deadLetter  bool
+}
+
+func (q *scheduledQueue) ClaimRecovery(_ context.Context, owner string, _ time.Duration) (execution.RecoveryLease, bool, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if owner == "" || !q.queued || q.claimed {
+		return execution.RecoveryLease{}, false, nil
+	}
+	q.claimed = true
+	if q.record.RecoveryAttempt == 0 {
+		q.record.RecoveryAttempt = 1
+	}
+	return execution.RecoveryLease{Record: q.record, Owner: owner, LeaseID: "scheduled-lease"}, true, nil
+}
+
+func (q *scheduledQueue) ReleaseRecovery(_ context.Context, id, leaseID string, completed bool) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if id != q.record.ExecutionID || leaseID != "scheduled-lease" {
+		return errors.New("wrong lease")
+	}
+	q.queued = !completed
+	q.claimed = false
+	return nil
+}
+
+func (q *scheduledQueue) RenewRecovery(_ context.Context, id, leaseID string, lease time.Duration) (time.Time, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if id != q.record.ExecutionID || leaseID != "scheduled-lease" || !q.claimed {
+		return time.Time{}, errors.New("stale lease")
+	}
+	q.renewals++
+	return time.Now().Add(lease), nil
+}
+
+func (q *scheduledQueue) ScheduleRecovery(_ context.Context, id, leaseID string, next time.Time, category, summary string) (execution.Record, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if id != q.record.ExecutionID || leaseID != "scheduled-lease" || !q.claimed {
+		return execution.Record{}, errors.New("stale lease")
+	}
+	q.record.NextAttemptAt = next
+	q.record.LastFailureCategory = category
+	q.record.LastFailureSummary = summary
+	q.scheduledAt = next
+	q.claimed = false
+	return q.record, nil
+}
+
+func (q *scheduledQueue) DeadLetterRecovery(_ context.Context, id, leaseID, category, summary string) (execution.Record, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if id != q.record.ExecutionID || leaseID != "scheduled-lease" || !q.claimed {
+		return execution.Record{}, errors.New("stale lease")
+	}
+	q.record.State = execution.StateOperatorReview
+	q.record.RecoveryQueued = false
+	q.record.LastFailureCategory = category
+	q.record.LastFailureSummary = summary
+	q.deadLetter = true
+	q.claimed = false
+	return q.record, nil
+}
+
+func TestWorkerSchedulesBoundedRetryWithDeterministicBackoff(t *testing.T) {
+	queue := &scheduledQueue{
+		record: execution.Record{ExecutionID: "scheduled-1", State: execution.StateExecutedUnconfirmed, RecoveryQueued: true},
+		queued: true,
+	}
+	store := execution.NewMemoryStore()
+	worker, err := recovery.NewWorker(recovery.Config{
+		Queue: queue, Store: store,
+		Verifier: recovery.VerifierFunc(func(context.Context, execution.Record) (recovery.Verification, error) {
+			return recovery.Verification{}, errors.New("provider timeout")
+		}),
+		Owner: "worker-a", Lease: time.Second, Poll: time.Second,
+		BackoffBase: time.Second, BackoffMax: 10 * time.Second, JitterFraction: 0, DisableJitter: true,
+		Now: func() time.Time { return time.Unix(100, 0) },
+	})
+	if err != nil {
+		t.Fatalf("NewWorker() error = %v", err)
+	}
+	result, err := worker.ProcessOne(context.Background())
+	if err != nil || !result.Scheduled {
+		t.Fatalf("ProcessOne() = %#v, %v", result, err)
+	}
+	if want := time.Unix(101, 0); !queue.scheduledAt.Equal(want) {
+		t.Fatalf("scheduled time = %v, want %v", queue.scheduledAt, want)
+	}
+}
+
+func TestWorkerDeadLettersAfterMaximumAttemptsAndEscalatesOnce(t *testing.T) {
+	queue := &scheduledQueue{
+		record: execution.Record{ExecutionID: "dead-letter-1", State: execution.StateExecutedUnconfirmed, RecoveryQueued: true, RecoveryAttempt: 2},
+		queued: true,
+	}
+	store := execution.NewMemoryStore()
+	escalations := 0
+	worker, err := recovery.NewWorker(recovery.Config{
+		Queue: queue, Store: store,
+		Verifier: recovery.VerifierFunc(func(context.Context, execution.Record) (recovery.Verification, error) {
+			return recovery.Verification{}, errors.New("provider unavailable")
+		}),
+		Escalator: recovery.EscalatorFunc(func(context.Context, execution.Record, error) error {
+			escalations++
+			return nil
+		}),
+		Owner: "worker-a", Lease: time.Second, Poll: time.Second, MaxAttempts: 2,
+	})
+	if err != nil {
+		t.Fatalf("NewWorker() error = %v", err)
+	}
+	result, err := worker.ProcessOne(context.Background())
+	if err != nil || !result.DeadLettered || !result.Escalated || !queue.deadLetter || escalations != 1 {
+		t.Fatalf("ProcessOne() = %#v, err=%v escalations=%d dead=%v", result, err, escalations, queue.deadLetter)
+	}
+}
+
+func TestWorkerRenewsLongVerificationLease(t *testing.T) {
+	queue := &scheduledQueue{
+		record: execution.Record{ExecutionID: "heartbeat-1", Operation: "test", OperationVersion: "1", State: execution.StateExecutedUnconfirmed, RecoveryQueued: true},
+		queued: true,
+	}
+	store := execution.NewMemoryStore()
+	if err := store.Put(context.Background(), queue.record); err != nil {
+		t.Fatalf("Put() error = %v", err)
+	}
+	worker, err := recovery.NewWorker(recovery.Config{
+		Queue: queue, Store: store,
+		Verifier: recovery.VerifierFunc(func(context.Context, execution.Record) (recovery.Verification, error) {
+			time.Sleep(80 * time.Millisecond)
+			return recovery.Verification{Confirmed: true, Outcome: core.OutcomeAllowed}, nil
+		}),
+		Owner: "worker-a", Lease: 150 * time.Millisecond, Poll: time.Second,
+	})
+	if err != nil {
+		t.Fatalf("NewWorker() error = %v", err)
+	}
+	result, err := worker.ProcessOne(context.Background())
+	if err != nil || !result.Reconciled || queue.renewals == 0 {
+		t.Fatalf("ProcessOne() = %#v, err=%v renewals=%d", result, err, queue.renewals)
 	}
 }

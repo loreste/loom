@@ -19,26 +19,32 @@ const (
 	StateDenied              State = "denied"
 	StateExecutedUnconfirmed State = "executed_unconfirmed"
 	StateReconciled          State = "reconciled"
+	StateOperatorReview      State = "operator_review"
 )
 
 // Record is the durable, caller-safe status of one execution attempt.
 // Response contains only filtered output and safe denial text. Input is never
 // stored here.
 type Record struct {
-	ExecutionID        string        `json:"execution_id"`
-	Operation          string        `json:"operation"`
-	OperationVersion   string        `json:"operation_version"`
-	Principal          string        `json:"principal,omitempty"`
-	Boundary           string        `json:"boundary,omitempty"`
-	Outcome            core.Outcome  `json:"outcome"`
-	State              State         `json:"state"`
-	Response           core.Response `json:"response"`
-	IdempotencyKey     string        `json:"idempotency_key,omitempty"`
-	Fingerprint        string        `json:"fingerprint,omitempty"`
-	RecoveryQueued     bool          `json:"recovery_queued,omitempty"`
-	ReconciliationNote string        `json:"reconciliation_note,omitempty"`
-	StartedAt          time.Time     `json:"started_at"`
-	UpdatedAt          time.Time     `json:"updated_at"`
+	ExecutionID         string        `json:"execution_id"`
+	Operation           string        `json:"operation"`
+	OperationVersion    string        `json:"operation_version"`
+	Principal           string        `json:"principal,omitempty"`
+	Boundary            string        `json:"boundary,omitempty"`
+	Outcome             core.Outcome  `json:"outcome"`
+	State               State         `json:"state"`
+	Response            core.Response `json:"response"`
+	IdempotencyKey      string        `json:"idempotency_key,omitempty"`
+	Fingerprint         string        `json:"fingerprint,omitempty"`
+	RecoveryQueued      bool          `json:"recovery_queued,omitempty"`
+	RecoveryAttempt     int           `json:"recovery_attempt,omitempty"`
+	NextAttemptAt       time.Time     `json:"next_attempt_at,omitempty"`
+	LastFailureCategory string        `json:"last_failure_category,omitempty"`
+	LastFailureSummary  string        `json:"last_failure_summary,omitempty"`
+	RecoveryEscalated   bool          `json:"recovery_escalated,omitempty"`
+	ReconciliationNote  string        `json:"reconciliation_note,omitempty"`
+	StartedAt           time.Time     `json:"started_at"`
+	UpdatedAt           time.Time     `json:"updated_at"`
 }
 
 // Store persists execution records. Production side-effecting operations
@@ -92,6 +98,20 @@ type RecoveryLease struct {
 type RecoveryQueue interface {
 	ClaimRecovery(context.Context, string, time.Duration) (RecoveryLease, bool, error)
 	ReleaseRecovery(context.Context, string, string, bool) error
+}
+
+// RecoveryHeartbeat is an optional extension implemented by shared queues.
+// Renewals are guarded by execution ID and lease ID; a stale worker can never
+// extend another worker's claim.
+type RecoveryHeartbeat interface {
+	RenewRecovery(context.Context, string, string, time.Duration) (time.Time, error)
+}
+
+// RecoveryScheduler is an optional extension for durable retry state. Schedule
+// and dead-letter transitions must be guarded by the live lease.
+type RecoveryScheduler interface {
+	ScheduleRecovery(context.Context, string, string, time.Time, string, string) (Record, error)
+	DeadLetterRecovery(context.Context, string, string, string, string) (Record, error)
 }
 
 // StateFor converts a response into its persisted lifecycle state.
