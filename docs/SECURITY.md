@@ -34,7 +34,15 @@ The SQL guard is defense in depth, not a parser-grade database sandbox. Use rest
 
 ## Identity boundaries
 
-Loom authenticates credentials but does not provide OIDC discovery, JWKS rotation, revocation, or enterprise identity lifecycle management. Inject an application verifier and configure issuer, audience, algorithms, key rotation, certificate rotation, claim mapping, and revocation behavior. The built-in HMAC verifier is intended for controlled deployments and tests. Demo principals are development credentials, not production identities.
+Loom includes an embeddable `identity/oidc` verifier for configured OIDC
+discovery, JWKS rotation, issuer/audience validation, algorithm allowlists, and
+explicit claim mapping. It is not an identity provider, tenant directory, token
+revocation service, or enterprise identity lifecycle manager. Applications own
+issuer configuration, key and certificate rotation, revocation policy, provider
+availability, and identity administration. The built-in HMAC verifier is
+intended for controlled deployments and tests. Demo principals are development
+credentials, not production identities.
+
 
 See [`IDENTITY.md`](IDENTITY.md).
 

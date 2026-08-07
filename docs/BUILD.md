@@ -78,8 +78,9 @@ docker build \
 
 The image builds the CLI with CGO disabled and runs as a non-root user from a
 distroless base image. It contains no demo credentials or application secrets.
-The repository does not publish a default container image; an organization
-should apply its own registry, signing, retention, and deployment policy.
+The release workflow publishes the official image to GHCR with Cosign signing,
+SBOM, and provenance. Deployments still choose their own retention, admission,
+and promotion policy.
 
 ## GitHub release workflow
 
@@ -93,9 +94,9 @@ Pushing a tag matching `v*` runs the release workflow. It:
 5. creates keyless Cosign signature bundles and build-provenance attestations;
 6. publishes all release evidence with the GitHub release.
 
-The workflow does not publish Python, npm, or Rust packages. SDK publication
-is a separate adoption phase and must use exact version alignment and registry
-provenance.
+The separate SDK publication workflow publishes Python, npm, and Rust packages
+after checking exact version alignment. Registry environments and trusted
+publisher settings are deployment configuration; see [`RELEASES.md`](RELEASES.md).
 
 ## Security gates
 

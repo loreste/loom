@@ -1,0 +1,93 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "loom.fullname" . }}
+  labels:
+    {{- include "loom.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.api.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "loom.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "loom.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      serviceAccountName: {{ include "loom.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: loom
+          image: {{ include "loom.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["serve"]
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: LOOM_ENV
+              value: production
+            - name: LOOM_REQUIRE_DURABLE
+              value: "true"
+            - name: LOOM_DISABLE_DEMO_PRINCIPALS
+              value: "true"
+            - name: LOOM_TRUSTED_TLS_PROXY
+              value: {{ .Values.loom.trustedTLSProxy | quote }}
+            - name: LOOM_TENANT_CLAIM
+              value: {{ .Values.loom.tenantClaim | quote }}
+            - name: LOOM_POLICY_SYNC_INTERVAL
+              value: {{ .Values.loom.policySyncInterval | quote }}
+            - name: LOOM_HTTP_RATE_LIMIT
+              value: {{ .Values.loom.httpRateLimitPerMinute | quote }}
+            - name: LOOM_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "loom.secretName" . }}
+                  key: {{ .Values.secrets.databaseURLKey }}
+            - name: LOOM_REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "loom.secretName" . }}
+                  key: {{ .Values.secrets.redisURLKey }}
+            - name: LOOM_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "loom.secretName" . }}
+                  key: {{ .Values.secrets.jwtSecretKey }}
+            - name: LOOM_JWT_ISSUER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "loom.secretName" . }}
+                  key: {{ .Values.secrets.jwtIssuerKey }}
+            - name: LOOM_JWT_AUDIENCE
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "loom.secretName" . }}
+                  key: {{ .Values.secrets.jwtAudienceKey }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}

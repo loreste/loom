@@ -3,6 +3,7 @@ name: security
 on:
   push:
     branches: [main, master]
+    tags: ["v*"]
   pull_request:
     branches: [main, master]
 
@@ -75,13 +76,13 @@ jobs:
             build-mode: none
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - uses: github/codeql-action/init@c4dd10e44af883a891fe31ced449bcb4a6728b9b
+      - uses: github/codeql-action/init@5595ccaf912efad79be6eef63a5619ff05969be3
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
       - if: matrix.build-mode == 'autobuild'
-        uses: github/codeql-action/autobuild@c4dd10e44af883a891fe31ced449bcb4a6728b9b
-      - uses: github/codeql-action/analyze@c4dd10e44af883a891fe31ced449bcb4a6728b9b
+        uses: github/codeql-action/autobuild@5595ccaf912efad79be6eef63a5619ff05969be3
+      - uses: github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3
 
   sbom:
     name: sbom

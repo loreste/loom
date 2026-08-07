@@ -1,0 +1,97 @@
+{{- if .Values.recoveryWorker.enabled }}
+{{- if not .Values.recoveryWorker.verifierURL }}
+{{- fail "recoveryWorker.verifierURL is required when the recovery worker is enabled" }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "loom.fullname" . }}-recovery
+  labels:
+    {{- include "loom.labels" . | nindent 4 }}
+    app.kubernetes.io/component: recovery-worker
+spec:
+  replicas: {{ .Values.recoveryWorker.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "loom.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: recovery-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "loom.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: recovery-worker
+    spec:
+      serviceAccountName: {{ include "loom.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: recovery-worker
+          image: {{ include "loom.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["recovery-worker"]
+          env:
+            - name: LOOM_ENV
+              value: production
+            - name: LOOM_REQUIRE_DURABLE
+              value: "true"
+            - name: LOOM_DISABLE_DEMO_PRINCIPALS
+              value: "true"
+            - name: LOOM_RECOVERY_VERIFIER_URL
+              value: {{ .Values.recoveryWorker.verifierURL | quote }}
+            - name: LOOM_RECOVERY_OWNER
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: LOOM_RECOVERY_POLL
+              value: {{ .Values.recoveryWorker.poll | quote }}
+            - name: LOOM_RECOVERY_LEASE
+              value: {{ .Values.recoveryWorker.lease | quote }}
+            - name: LOOM_RECOVERY_BACKOFF_BASE
+              value: {{ .Values.recoveryWorker.backoffBase | quote }}
+            - name: LOOM_RECOVERY_BACKOFF_MAX
+              value: {{ .Values.recoveryWorker.backoffMax | quote }}
+            - name: LOOM_RECOVERY_MAX_ATTEMPTS
+              value: {{ .Values.recoveryWorker.maxAttempts | quote }}
+            - name: LOOM_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "loom.secretName" . }}
+                  key: {{ .Values.secrets.databaseURLKey }}
+            - name: LOOM_REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "loom.secretName" . }}
+                  key: {{ .Values.secrets.redisURLKey }}
+            - name: LOOM_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "loom.secretName" . }}
+                  key: {{ .Values.secrets.jwtSecretKey }}
+            - name: LOOM_JWT_ISSUER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "loom.secretName" . }}
+                  key: {{ .Values.secrets.jwtIssuerKey }}
+            - name: LOOM_JWT_AUDIENCE
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "loom.secretName" . }}
+                  key: {{ .Values.secrets.jwtAudienceKey }}
+            - name: LOOM_RECOVERY_VERIFIER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "loom.secretName" . }}
+                  key: {{ .Values.secrets.recoveryVerifierTokenKey }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml .Values.recoveryWorker.resources | nindent 12 }}
+{{- end }}

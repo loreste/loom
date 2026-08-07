@@ -68,6 +68,30 @@ every payment provider, telecom system, database transaction, or job queue.
 The integration must use an authoritative provider reference and must not trust
 a caller-supplied “success” flag.
 
+## Official CLI worker
+
+The release image includes `loom recovery-worker`. It requires a durable
+PostgreSQL-backed platform and an application-owned HTTPS verifier endpoint:
+
+```sh
+LOOM_ENV=production \
+LOOM_REQUIRE_DURABLE=true \
+LOOM_DISABLE_DEMO_PRINCIPALS=true \
+LOOM_DATABASE_URL="$LOOM_DATABASE_URL" \
+LOOM_REDIS_URL="$LOOM_REDIS_URL" \
+LOOM_JWT_SECRET="$LOOM_JWT_SECRET" \
+LOOM_JWT_ISSUER="$LOOM_JWT_ISSUER" \
+LOOM_JWT_AUDIENCE="$LOOM_JWT_AUDIENCE" \
+LOOM_RECOVERY_VERIFIER_URL="https://provider.example/recovery/verify" \
+loom recovery-worker
+```
+
+The verifier receives JSON containing `execution_id`, `operation`, and
+`operation_version`, and returns `confirmed`, `outcome` (`allowed` or `denied`),
+and an optional bounded note. It must perform an authoritative provider lookup;
+it must not trust a caller-provided success flag. The worker logs only the
+execution ID when escalating to operator review.
+
 ## Processing and retry rules
 
 1. Claim one queued record with a short-lived lease.

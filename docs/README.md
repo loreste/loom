@@ -35,6 +35,8 @@ each task.
 | Performance benchmark and measurement guidance | [`PERFORMANCE.md`](PERFORMANCE.md) |
 | Failure-injection scenarios and results | [`FAILURE-INJECTION.md`](FAILURE-INJECTION.md) |
 | Local checks and release artifacts | [`BUILD.md`](BUILD.md) |
+| Package, image, and artifact publication | [`RELEASES.md`](RELEASES.md) |
+| Kubernetes and Helm deployment | [`KUBERNETES.md`](KUBERNETES.md) |
 | Release history | [`../CHANGELOG.md`](../CHANGELOG.md) |
 
 ## Examples and source

@@ -358,6 +358,7 @@ func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Res
 				duration = time.Since(start)
 			}
 			rt.deps.Observer.Observe(Observation{
+				Context:            ctx,
 				ExecutionID:        resp.ExecutionID,
 				TraceID:            resp.TraceID,
 				Operation:          req.Operation,

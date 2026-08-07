@@ -4,6 +4,12 @@ Loom's failure handling is tested by making individual enforcement and storage
 dependencies fail. The tests assert that the runtime does not grant access,
 leak output, reuse approval, or rerun a side-effecting handler.
 
+The Go test suite covers the fail-closed unit and race cases listed below. The
+deployment-specific PostgreSQL/Redis restart, network partition, multi-replica,
+and 24-hour soak cases are not inferred from in-memory tests; publish them with
+topology, versions, timing, and injected-failure details before making a
+production capacity or recovery claim.
+
 ## Reproduce the checks
 
 ```bash
