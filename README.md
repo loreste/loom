@@ -63,7 +63,7 @@ transactions.
 
 ## Compliance visibility
 
-Every governed attempt produces a structured audit decision with an execution ID, trace ID, selected operation version, adapter, boundary, enforcement stage, stable reason code, outcome, and redacted correlation digests. Reconciliation and recovery actions are recorded as lifecycle events. `runtime.Metrics` exposes bounded counters for denials, replays, quota and approval outcomes, idempotency conflicts, and uncertain executions.
+Every governed attempt produces a structured audit decision with an execution ID, trace ID, selected operation version, adapter, boundary, enforcement stage, stable reason code, outcome, and redacted correlation digests. Reconciliation and recovery actions are recorded as lifecycle events. `runtime.Metrics` exposes bounded counters for denials, replays, quota and approval outcomes, idempotency conflicts, and uncertain executions. The maintained `observability/otel` bridge exports bounded metrics and annotates an existing OpenTelemetry span without emitting credentials or high-cardinality customer identifiers.
 
 Loom keeps credentials, approval tokens, idempotency keys, raw SQL, and unrestricted request bodies out of audit events. Configure a durable PostgreSQL or JSONL sink for production and export it to the immutable archive, SIEM, or compliance system required by your organization. See [`docs/OBSERVABILITY.md`](docs/OBSERVABILITY.md).
 

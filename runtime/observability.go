@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -15,6 +16,9 @@ import (
 // Prometheus, or their existing metrics system without adding a dependency to
 // the security core.
 type Observation struct {
+	// Context carries the request context to maintained telemetry bridges. It
+	// is never serialized or used as an authorization input.
+	Context            context.Context
 	ExecutionID        string
 	TraceID            string
 	Operation          string

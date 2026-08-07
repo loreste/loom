@@ -21,6 +21,8 @@ All notable changes to Loom are documented here. The format follows
   provenance attestations, and an exact-commit CI gate. The installer verifies
   checksums before installation, and all workflow actions are pinned to commit
   SHAs with Dependabot monitoring.
+- Added the maintained `observability/otel` bridge for bounded metrics and
+  current-span annotations without sensitive or high-cardinality labels.
 
 ## [0.1.7] — 2026-08-05
 

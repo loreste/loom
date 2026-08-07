@@ -9,6 +9,29 @@ Loom is a security enforcement point, so operators need to answer four questions
 
 Loom provides structured audit events and a small dependency-free metrics collector. Applications may bridge the same records to OpenTelemetry, Prometheus, SIEM, or an existing compliance platform.
 
+## Official OpenTelemetry bridge
+
+The maintained `observability/otel` package implements `runtime.Observer`. It
+records execution counters and duration histograms and annotates the current
+OpenTelemetry span when the request context already carries one:
+
+```go
+bridge, err := loomotel.New(loomotel.Config{
+    Meter:  meterProvider.Meter("loom-app"),
+    Tracer: tracerProvider.Tracer("loom-app"),
+})
+if err != nil {
+    return err
+}
+deps.Observer = bridge
+```
+
+The bridge labels only operation, exact operation version, adapter, decision,
+outcome, stable reason, and enforcement stage. It never emits execution IDs,
+principals, boundaries, credentials, SQL, request bodies, or customer IDs as
+metric labels or span attributes. Applications remain responsible for
+configuring exporters, sampling, access controls, and retention.
+
 ## Audit events
 
 The runtime emits one final `execution.decision` event for each execution attempt. The event records the final decision and the enforcement stage and reason. It is not a verbose trace of every internal function call; this keeps the security record stable and prevents implementation details from becoming a compatibility contract.
