@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/loreste/loom/core"
@@ -23,6 +24,14 @@ const defaultArchiveBatch = 1000
 // revision predicate so a stale writer cannot overwrite a newer state.
 type ExecutionStore struct {
 	db *sql.DB
+}
+
+func boundedFailureSummary(summary string) string {
+	summary = strings.TrimSpace(summary)
+	if len(summary) > 512 {
+		return summary[:512]
+	}
+	return summary
 }
 
 // NewExecutionStore wraps a migrated PostgreSQL pool.
@@ -524,6 +533,114 @@ func (s *ExecutionStore) DeadLetterRecovery(ctx context.Context, id, leaseID, ca
 	return record, nil
 }
 
+// ListRecovery returns bounded, caller-safe records awaiting recovery or
+// operator review. It never returns raw request bodies; execution.Record is
+// intentionally limited to durable status fields.
+func (s *ExecutionStore) ListRecovery(ctx context.Context, state execution.State, limit int) ([]execution.Record, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("%w: nil execution store", core.ErrInvalidArgument)
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 1000 {
+		return nil, fmt.Errorf("%w: recovery list limit exceeds maximum", core.ErrInvalidArgument)
+	}
+	if state != "" && state != execution.StateExecutedUnconfirmed && state != execution.StateOperatorReview {
+		return nil, fmt.Errorf("%w: invalid recovery state", core.ErrInvalidArgument)
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT `+executionColumns+`
+		FROM loom_executions
+		WHERE ($1 = '' OR state = $1)
+		  AND (recovery_queued = TRUE OR state = $2)
+		ORDER BY updated_at ASC
+		LIMIT $3
+	`, string(state), string(execution.StateOperatorReview), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]execution.Record, 0)
+	for rows.Next() {
+		record, _, _, _, err := scanExecutionRecord(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// RequeueRecovery is an approved operator transition from dead-letter state
+// back to uncertain recovery. It never invokes the original business handler.
+func (s *ExecutionStore) RequeueRecovery(ctx context.Context, id, reason string) (execution.Record, error) {
+	if s == nil || s.db == nil || strings.TrimSpace(id) == "" {
+		return execution.Record{}, fmt.Errorf("%w: execution ID is required", core.ErrInvalidArgument)
+	}
+	reason = boundedFailureSummary(reason)
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE loom_executions
+		SET state = $2, outcome = $3, recovery_queued = TRUE,
+		    recovery_escalated = FALSE, next_attempt_at = NULL,
+		    last_failure_category = 'operator_requeue', last_failure_summary = $4,
+		    recovery_lease_id = NULL, recovery_lease_owner = NULL,
+		    recovery_lease_until = NULL, updated_at = NOW(), revision = revision + 1
+		WHERE execution_id = $1 AND state = $5 AND recovery_queued = FALSE
+	`, id, execution.StateExecutedUnconfirmed, core.OutcomeExecutedUnconfirmed, reason, execution.StateOperatorReview)
+	if err != nil {
+		return execution.Record{}, err
+	}
+	if changed, _ := result.RowsAffected(); changed != 1 {
+		return execution.Record{}, fmt.Errorf("%w: execution is not in operator review", core.ErrNotFound)
+	}
+	record, ok, err := s.Get(ctx, id)
+	if err != nil {
+		return execution.Record{}, err
+	}
+	if !ok {
+		return execution.Record{}, fmt.Errorf("%w: execution %s", core.ErrNotFound, id)
+	}
+	return record, nil
+}
+
+// DeadLetterRecoveryAdmin is an approved operator transition that prevents a
+// recoverable record from being automatically retried. A live worker lease
+// blocks the transition so an operator cannot race active recovery.
+func (s *ExecutionStore) DeadLetterRecoveryAdmin(ctx context.Context, id, reason string) (execution.Record, error) {
+	if s == nil || s.db == nil || strings.TrimSpace(id) == "" {
+		return execution.Record{}, fmt.Errorf("%w: execution ID is required", core.ErrInvalidArgument)
+	}
+	reason = boundedFailureSummary(reason)
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE loom_executions
+		SET state = $2, recovery_queued = FALSE, recovery_escalated = TRUE,
+		    next_attempt_at = NULL, last_failure_category = 'operator_dead_letter',
+		    last_failure_summary = $3, recovery_lease_id = NULL,
+		    recovery_lease_owner = NULL, recovery_lease_until = NULL,
+		    updated_at = NOW(), revision = revision + 1
+		WHERE execution_id = $1 AND state = $4 AND recovery_queued = TRUE
+		  AND (recovery_lease_until IS NULL OR recovery_lease_until <= NOW())
+	`, id, execution.StateOperatorReview, reason, execution.StateExecutedUnconfirmed)
+	if err != nil {
+		return execution.Record{}, err
+	}
+	if changed, _ := result.RowsAffected(); changed != 1 {
+		return execution.Record{}, fmt.Errorf("%w: execution is active, terminal, or already reviewed", core.ErrNotFound)
+	}
+	record, ok, err := s.Get(ctx, id)
+	if err != nil {
+		return execution.Record{}, err
+	}
+	if !ok {
+		return execution.Record{}, fmt.Errorf("%w: execution %s", core.ErrNotFound, id)
+	}
+	return record, nil
+}
+
 // ReleaseRecovery releases a lease. completed removes the item from the
 // recovery queue; false makes it immediately claimable again.
 func (s *ExecutionStore) ReleaseRecovery(ctx context.Context, id, leaseID string, completed bool) error {
@@ -671,4 +788,5 @@ var _ execution.Store = (*ExecutionStore)(nil)
 var _ execution.RecoveryQueue = (*ExecutionStore)(nil)
 var _ execution.RecoveryHeartbeat = (*ExecutionStore)(nil)
 var _ execution.RecoveryScheduler = (*ExecutionStore)(nil)
+var _ execution.RecoveryAdmin = (*ExecutionStore)(nil)
 var _ idempotency.RecoveryQueue = (*ExecutionStore)(nil)

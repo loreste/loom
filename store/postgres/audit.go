@@ -24,6 +24,74 @@ type AuditSink struct {
 	streamID string
 }
 
+const maxAuditExportEvents int64 = 10000
+
+// ExportStream returns one contiguous, verified audit segment. The caller
+// must provide the trusted hash immediately before fromSequence; a hash read
+// from the same untrusted export is not sufficient. Missing rows, a stream
+// mismatch, or any hash-chain modification causes the export to fail closed.
+func (s *AuditSink) ExportStream(ctx context.Context, streamID string, fromSequence, toSequence int64, trustedPreviousHash string) ([]audit.Event, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("%w: audit sink is not configured", core.ErrInvalidArgument)
+	}
+	streamID = strings.TrimSpace(streamID)
+	if streamID == "" || fromSequence <= 0 || toSequence < fromSequence {
+		return nil, fmt.Errorf("%w: audit stream and sequence range are required", core.ErrInvalidArgument)
+	}
+	if toSequence-fromSequence+1 > maxAuditExportEvents {
+		return nil, fmt.Errorf("%w: audit export range exceeds limit", core.ErrInvalidArgument)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT (to_jsonb(a) - 'ts' - 'sequence_no') ||
+		       jsonb_build_object('timestamp', a.ts, 'sequence', a.sequence_no)
+		FROM loom_audit AS a
+		WHERE a.audit_stream = $1
+		  AND a.sequence_no BETWEEN $2 AND $3
+		ORDER BY a.sequence_no ASC
+	`, streamID, fromSequence, toSequence)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	events := make([]audit.Event, 0, toSequence-fromSequence+1)
+	for rows.Next() {
+		var raw []byte
+		if err := rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		var event audit.Event
+		if err := json.Unmarshal(raw, &event); err != nil {
+			return nil, fmt.Errorf("audit export: decode event: %w", err)
+		}
+		if event.AuditStream != streamID || event.Sequence < fromSequence || event.Sequence > toSequence {
+			return nil, fmt.Errorf("audit export: event is outside requested stream or range")
+		}
+		events = append(events, event)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	expected := toSequence - fromSequence + 1
+	if int64(len(events)) != expected {
+		return nil, fmt.Errorf("audit export: incomplete sequence range: got %d events, want %d", len(events), expected)
+	}
+	for index, event := range events {
+		wantSequence := fromSequence + int64(index)
+		if event.Sequence != wantSequence {
+			return nil, fmt.Errorf("audit export: sequence gap or reordering at %d", wantSequence)
+		}
+	}
+	if err := audit.VerifyChain(events, trustedPreviousHash); err != nil {
+		return nil, fmt.Errorf("audit export: verify chain: %w", err)
+	}
+	return events, nil
+}
+
 // Durable reports that audit records are persisted in PostgreSQL.
 func (s *AuditSink) Durable() bool { return s != nil && s.db != nil && s.streamID != "" }
 

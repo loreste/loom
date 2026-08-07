@@ -4,12 +4,15 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -114,6 +117,215 @@ func (a *Adapter) runAuditVerify(args []string) int {
 	encoded, _ := json.Marshal(result)
 	fmt.Fprintln(a.outW(), string(encoded))
 	return 0
+}
+
+func (a *Adapter) runAuditHead(args []string) int {
+	flags := parseFlags(args)
+	path := strings.TrimSpace(flags["input"])
+	if path == "" {
+		fmt.Fprintln(a.errW(), "audit input path required")
+		return 2
+	}
+	events, err := loadAuditEvents(path)
+	if err != nil {
+		fmt.Fprintln(a.errW(), "audit head:", err)
+		return 1
+	}
+	if err := audit.VerifyChain(events, strings.TrimSpace(flags["initial-hash"])); err != nil {
+		fmt.Fprintln(a.errW(), "audit head: chain invalid")
+		return 1
+	}
+	result := map[string]any{"valid": true, "event_count": len(events)}
+	if len(events) > 0 {
+		last := events[len(events)-1]
+		result["sequence"] = last.Sequence
+		result["event_hash"] = last.EventHash
+		result["audit_stream"] = last.AuditStream
+	}
+	return writeJSON(a.outW(), result, a.errW(), "audit head")
+}
+
+// runAuditExport filters a bounded JSONL audit stream and verifies its chain
+// before writing the selected events. A segment must be checked against a
+// trusted hash supplied by the operator, never a hash from the same file.
+func (a *Adapter) runAuditExport(args []string) int {
+	flags := parseFlags(args)
+	path := strings.TrimSpace(flags["input"])
+	if path == "" {
+		fmt.Fprintln(a.errW(), "audit input path required")
+		return 2
+	}
+	events, err := loadAuditEvents(path)
+	if err != nil {
+		fmt.Fprintln(a.errW(), "audit export:", err)
+		return 1
+	}
+	from, to, err := auditRange(flags)
+	if err != nil {
+		fmt.Fprintln(a.errW(), "audit export:", err)
+		return 2
+	}
+	selected := events
+	if from > 0 || to > 0 {
+		lower := from
+		if lower <= 0 {
+			lower = 1
+		}
+		selected = make([]audit.Event, 0, len(events))
+		for _, event := range events {
+			if event.Sequence >= lower && (to == 0 || event.Sequence <= to) {
+				selected = append(selected, event)
+			}
+		}
+		if to > 0 && int64(len(selected)) != to-lower+1 {
+			fmt.Fprintln(a.errW(), "audit export: incomplete sequence range")
+			return 1
+		}
+	}
+	if err := audit.VerifyChain(selected, strings.TrimSpace(flags["initial-hash"])); err != nil {
+		fmt.Fprintln(a.errW(), "audit export: chain invalid")
+		return 1
+	}
+	encoder := json.NewEncoder(a.outW())
+	encoder.SetEscapeHTML(false)
+	for _, event := range selected {
+		if err := encoder.Encode(event); err != nil {
+			fmt.Fprintln(a.errW(), "audit export: output failed")
+			return 1
+		}
+	}
+	return 0
+}
+
+func (a *Adapter) runAuditCheckpoint(args []string) int {
+	flags := parseFlags(args)
+	path := strings.TrimSpace(flags["input"])
+	if path == "" {
+		fmt.Fprintln(a.errW(), "audit input path required")
+		return 2
+	}
+	keyText := strings.TrimSpace(os.Getenv("LOOM_AUDIT_CHECKPOINT_KEY"))
+	if keyText == "" {
+		fmt.Fprintln(a.errW(), "audit checkpoint requires LOOM_AUDIT_CHECKPOINT_KEY")
+		return 2
+	}
+	key, err := decodeCheckpointKey(keyText)
+	if err != nil {
+		fmt.Fprintln(a.errW(), "audit checkpoint: invalid key")
+		return 2
+	}
+	events, err := loadAuditEvents(path)
+	if err != nil {
+		fmt.Fprintln(a.errW(), "audit checkpoint:", err)
+		return 1
+	}
+	signer, err := audit.NewHMACCheckpointSigner(key)
+	if err != nil {
+		fmt.Fprintln(a.errW(), "audit checkpoint: invalid key")
+		return 2
+	}
+	checkpoint, err := audit.CreateCheckpoint(events, signer)
+	if err != nil {
+		fmt.Fprintln(a.errW(), "audit checkpoint: chain invalid")
+		return 1
+	}
+	if err := json.NewEncoder(a.outW()).Encode(checkpoint); err != nil {
+		fmt.Fprintln(a.errW(), "audit checkpoint: output failed")
+		return 1
+	}
+	return 0
+}
+
+// runAuditRotate creates a new signed checkpoint with the currently supplied
+// checkpoint key. Deployments should source this key from a KMS/HSM-backed
+// secret and archive the prior checkpoint before rotation.
+func (a *Adapter) runAuditRotate(args []string) int {
+	flags := parseFlags(args)
+	path := strings.TrimSpace(flags["input"])
+	if path == "" {
+		fmt.Fprintln(a.errW(), "audit input path required")
+		return 2
+	}
+	keyText := strings.TrimSpace(os.Getenv("LOOM_AUDIT_CHECKPOINT_KEY"))
+	if keyText == "" {
+		fmt.Fprintln(a.errW(), "audit rotate requires LOOM_AUDIT_CHECKPOINT_KEY")
+		return 2
+	}
+	key, err := decodeCheckpointKey(keyText)
+	if err != nil {
+		fmt.Fprintln(a.errW(), "audit rotate: invalid key")
+		return 2
+	}
+	events, err := loadAuditEvents(path)
+	if err != nil {
+		fmt.Fprintln(a.errW(), "audit rotate:", err)
+		return 1
+	}
+	signer, err := audit.NewHMACCheckpointSigner(key)
+	if err != nil {
+		fmt.Fprintln(a.errW(), "audit rotate: invalid key")
+		return 2
+	}
+	checkpoint, err := audit.CreateCheckpoint(events, signer)
+	if err != nil {
+		fmt.Fprintln(a.errW(), "audit rotate: chain invalid")
+		return 1
+	}
+	result := map[string]any{"rotated": true, "checkpoint": checkpoint}
+	return writeJSON(a.outW(), result, a.errW(), "audit rotate")
+}
+
+func auditRange(flags map[string]string) (int64, int64, error) {
+	var from, to int64
+	var err error
+	if value := strings.TrimSpace(flags["from"]); value != "" {
+		from, err = strconv.ParseInt(value, 10, 64)
+		if err != nil || from <= 0 {
+			return 0, 0, fmt.Errorf("--from must be a positive sequence")
+		}
+	}
+	if value := strings.TrimSpace(flags["to"]); value != "" {
+		to, err = strconv.ParseInt(value, 10, 64)
+		if err != nil || to <= 0 {
+			return 0, 0, fmt.Errorf("--to must be a positive sequence")
+		}
+	}
+	if from > 0 && to > 0 && to < from {
+		return 0, 0, fmt.Errorf("--to must not precede --from")
+	}
+	return from, to, nil
+}
+
+func decodeCheckpointKey(value string) ([]byte, error) {
+	if decoded, err := base64.RawStdEncoding.DecodeString(value); err == nil {
+		return decoded, nil
+	}
+	return hex.DecodeString(value)
+}
+
+func loadAuditEvents(path string) ([]audit.Event, error) {
+	file, err := os.Open(path) // #nosec G304 -- explicit offline operator input
+	if err != nil {
+		return nil, fmt.Errorf("unable to open input")
+	}
+	defer file.Close()
+	scanner := bufio.NewScanner(io.LimitReader(file, 256<<20))
+	scanner.Buffer(make([]byte, 64<<10), 2<<20)
+	events := make([]audit.Event, 0, 1024)
+	for scanner.Scan() {
+		var event audit.Event
+		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
+			return nil, fmt.Errorf("invalid event JSON")
+		}
+		events = append(events, event)
+		if len(events) > 1_000_000 {
+			return nil, fmt.Errorf("event limit exceeded")
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("input read failed")
+	}
+	return events, nil
 }
 
 func validateOperatorURL(raw string) error {

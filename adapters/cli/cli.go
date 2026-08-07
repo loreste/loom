@@ -38,6 +38,9 @@ type Adapter struct {
 	TokenEnv        string
 	Out             io.Writer
 	Err             io.Writer
+	// HTTPClient is injectable for operator tests and controlled transports.
+	// Production callers should leave it nil to use the bounded default.
+	HTTPClient *http.Client
 	// Version string shown by `loom version` (set by cmd/loom via ldflags).
 	Version string
 }
@@ -69,8 +72,20 @@ func (a *Adapter) Run(ctx context.Context, args []string) int {
   loom mint-jwt --sub=user:alice --boundary=dev --caps=document.read   # requires LOOM_DEV_TOOLS=1
   loom approve --token=appr-1 --principal=user:bob --op=payment.capture --boundary=dev  # requires LOOM_DEV_TOOLS=1
   loom recovery-worker --verifier-url=https://provider.example/recovery
+  loom recovery list --url=https://loom.example --token=$LOOM_TOKEN --boundary=ops
+  loom recovery requeue --execution-id=<id> --url=https://loom.example --token=$LOOM_TOKEN --boundary=ops --idempotency-key=<key> --approval-token=<token>
+  loom recovery dead-letter --execution-id=<id> --url=https://loom.example --token=$LOOM_TOKEN --boundary=ops --idempotency-key=<key> --approval-token=<token>
   loom execution get <execution-id> --url=https://loom.example --token=$LOOM_TOKEN
-  loom audit verify --input=/var/log/loom/audit.jsonl
+  loom audit head --input=/var/log/loom/audit.jsonl [--initial-hash=HASH]
+  loom audit verify --input=/var/log/loom/audit.jsonl [--initial-hash=HASH]
+  loom audit export --input=/var/log/loom/audit.jsonl [--from=N --to=N --initial-hash=HASH]
+  loom audit checkpoint --input=/var/log/loom/audit.jsonl
+  loom audit rotate --input=/var/log/loom/audit.jsonl
+  loom policy lint --input=policy.json
+  loom policy test --input=policy-with-tests.json
+  loom policy diff --from=old-policy.json --to=new-policy.json
+  loom policy explain --input=policy.json --principal=user:alice --boundary=dev --operation=document.read
+  loom policy simulate --input=policy.json --principal=user:alice --boundary=dev --operation=document.read
   loom migrate
   loom version`)
 		return 2
@@ -94,6 +109,15 @@ func (a *Adapter) Run(ctx context.Context, args []string) int {
 		return a.runApprove(args[1:])
 	case "recovery-worker":
 		return a.runRecoveryWorker(ctx, args[1:])
+	case "recovery":
+		if len(args) > 1 {
+			command := strings.ReplaceAll(args[1], "-", "_")
+			if command == "list" || command == "requeue" || command == "dead_letter" {
+				return a.runRecoveryAdmin(ctx, command, args[2:])
+			}
+		}
+		fmt.Fprintln(a.errW(), "usage: loom recovery list|requeue|dead_letter [flags]")
+		return 2
 	case "execution":
 		if len(args) > 1 && args[1] == "get" {
 			return a.runExecutionGet(ctx, args[2:])
@@ -101,10 +125,38 @@ func (a *Adapter) Run(ctx context.Context, args []string) int {
 		fmt.Fprintln(a.errW(), "usage: loom execution get <execution-id> --url=... --token=...")
 		return 2
 	case "audit":
-		if len(args) > 1 && args[1] == "verify" {
-			return a.runAuditVerify(args[2:])
+		if len(args) > 1 {
+			switch args[1] {
+			case "verify":
+				return a.runAuditVerify(args[2:])
+			case "head":
+				return a.runAuditHead(args[2:])
+			case "export":
+				return a.runAuditExport(args[2:])
+			case "checkpoint":
+				return a.runAuditCheckpoint(args[2:])
+			case "rotate":
+				return a.runAuditRotate(args[2:])
+			}
 		}
-		fmt.Fprintln(a.errW(), "usage: loom audit verify --input=/path/audit.jsonl [--initial-hash=...]")
+		fmt.Fprintln(a.errW(), "usage: loom audit head|verify|export|checkpoint|rotate --input=/path/audit.jsonl")
+		return 2
+	case "policy":
+		if len(args) > 1 {
+			switch args[1] {
+			case "lint":
+				return a.runPolicyLint(args[2:])
+			case "test":
+				return a.runPolicyTest(args[2:])
+			case "diff":
+				return a.runPolicyDiff(args[2:])
+			case "explain":
+				return a.runPolicyExplain(args[2:], false)
+			case "simulate":
+				return a.runPolicyExplain(args[2:], true)
+			}
+		}
+		fmt.Fprintln(a.errW(), "usage: loom policy lint|test|diff|explain|simulate")
 		return 2
 	case "migrate":
 		// Platform construction runs the idempotent schema migration before

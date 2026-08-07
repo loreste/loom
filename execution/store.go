@@ -114,6 +114,16 @@ type RecoveryScheduler interface {
 	DeadLetterRecovery(context.Context, string, string, string, string) (Record, error)
 }
 
+// RecoveryAdmin is the durable, governed control-plane surface for recovery
+// review. Implementations must enforce lifecycle/state guards atomically;
+// callers must invoke these methods through registered administrative
+// operations rather than exposing a private storage bypass.
+type RecoveryAdmin interface {
+	ListRecovery(context.Context, State, int) ([]Record, error)
+	RequeueRecovery(context.Context, string, string) (Record, error)
+	DeadLetterRecoveryAdmin(context.Context, string, string) (Record, error)
+}
+
 // StateFor converts a response into its persisted lifecycle state.
 func StateFor(response core.Response) State {
 	if response.Outcome == core.OutcomeExecutedUnconfirmed {

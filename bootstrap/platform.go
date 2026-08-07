@@ -526,10 +526,16 @@ func (p *Platform) registerDomains() error {
 	if err := ai.Register(p.Registry); err != nil {
 		return err
 	}
-	return admin.Register(p.Registry, admin.Deps{
+	if err := admin.Register(p.Registry, admin.Deps{
 		Approvals: p.Approval,
 		Registry:  p.Registry,
-	})
+	}); err != nil {
+		return err
+	}
+	if recoveryAdmin, ok := p.ExecutionStatus.(execution.RecoveryAdmin); ok {
+		return admin.RegisterRecovery(p.Registry, admin.RecoveryDeps{Store: recoveryAdmin})
+	}
+	return nil
 }
 
 func (p *Platform) demoToken(configured map[string]string, id core.PrincipalID) (string, error) {
