@@ -1,6 +1,6 @@
 {
   "name": "@loreste/loom-sdk",
-	"version": "0.1.7",
+	"version": "0.1.8",
   "description": "Loom Universal Runtime TypeScript SDK (HTTP client)",
   "type": "module",
   "main": "dist/index.js",

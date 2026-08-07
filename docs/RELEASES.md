@@ -2,7 +2,7 @@
 
 Loom uses the root [`VERSION`](../VERSION) file as the source of truth for
 the Go CLI and all supported SDK packages. A release tag is the same version
-with a `v` prefix, for example `VERSION=0.1.7` and tag `v0.1.7`.
+with a `v` prefix, for example `VERSION=X.Y.Z` and tag `vX.Y.Z`.
 
 ## Published artifacts
 
@@ -22,8 +22,9 @@ Go module proxy.
 Publication uses GitHub OIDC wherever the registry supports it. Configure
 protected environments named `pypi`, `npm`, and `crates-io`, and register this
 repository and its release workflow with each registry's trusted-publisher
-settings. The npm job accepts the environment's `NPM_TOKEN` because npm account
-policy may require a token; do not commit or place that token in the repository.
+settings. The npm job uses npm trusted publishing through GitHub OIDC; no
+long-lived npm token is stored in GitHub Actions or the repository. The PyPI and
+crates.io publishers use the equivalent OIDC configuration at their registries.
 
 The container job uses the repository-scoped `GITHUB_TOKEN` for GHCR and keyless
 Cosign identity from GitHub OIDC. No registry credentials are baked into the

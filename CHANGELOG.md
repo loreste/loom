@@ -6,6 +6,10 @@ All notable changes to Loom are documented here. The format follows
 
 ## [Unreleased]
 
+No unreleased changes.
+
+## [0.1.8] — 2026-08-07
+
 ### Added
 
 - Embeddable OIDC discovery and JWKS verification with exact issuer and
