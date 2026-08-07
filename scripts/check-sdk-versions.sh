@@ -19,11 +19,17 @@ read_value() {
 python_version=$(read_value "$root/sdk/python/pyproject.toml" '^version = "([^"]+)"$')
 typescript_version=$(read_value "$root/sdk/typescript/package.json" '^[[:space:]]*"version": "([^"]+)",$')
 rust_version=$(read_value "$root/sdk/rust/Cargo.toml" '^version = "([^"]+)"$')
+python_agent_version=$(read_value "$root/sdk/python/loom/__init__.py" '^[[:space:]]*user_agent: str = "loom-python-sdk\/([^"]+)"')
+typescript_agent_version=$(read_value "$root/sdk/typescript/src/index.ts" '^[[:space:]]*"User-Agent": "loom-typescript-sdk\/([^",]+)",[[:space:]]*$')
+rust_agent_version=$(read_value "$root/sdk/rust/src/lib.rs" '^[[:space:]]*\.header\(USER_AGENT, "loom-rust-sdk\/([^" )]+)"\)[[:space:]]*$')
 
 for pair in \
-	"Python:$python_version" \
-	"TypeScript:$typescript_version" \
-	"Rust:$rust_version"; do
+  "Python:$python_version" \
+  "TypeScript:$typescript_version" \
+  "Rust:$rust_version" \
+  "Python user agent:$python_agent_version" \
+  "TypeScript user agent:$typescript_agent_version" \
+  "Rust user agent:$rust_agent_version"; do
 	name=${pair%%:*}
 	value=${pair#*:}
 	if [ "$value" != "$expected" ]; then

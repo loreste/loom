@@ -16,9 +16,10 @@ import (
 //
 //	-ldflags "-X main.version=… -X main.commit=… -X main.date=…"
 //
-// Default matches VERSION file when not injected (dev builds).
+// Development builds report dev; release builds receive the exact VERSION
+// value through ldflags.
 var (
-	version = "0.1.7"
+	version = "dev"
 	commit  = "unknown"
 	date    = "unknown"
 )
