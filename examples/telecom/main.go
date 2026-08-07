@@ -86,11 +86,11 @@ func newTelecomPlatform(token string) (*bootstrap.Platform, error) {
 		return nil, err
 	}
 	if err := p.Boundary.Grant(operatorID, boundary); err != nil {
-		p.Close()
+		_ = p.Close()
 		return nil, err
 	}
 	if err := p.Memory.Register(identity.StaticPrincipal{ID: operatorID, Token: token, Type: "service", Boundary: boundary, Capabilities: []string{operatorCap}}); err != nil {
-		p.Close()
+		_ = p.Close()
 		return nil, err
 	}
 	for _, item := range telecomOperations {
@@ -107,23 +107,23 @@ func newTelecomPlatform(token string) (*bootstrap.Platform, error) {
 			SensitiveFields: []string{"customer_id", "delta"},
 		}
 		if err := p.Registry.Register(op, telecomHandler(item.name)); err != nil {
-			p.Close()
+			_ = p.Close()
 			return nil, err
 		}
 		if err := p.Policy.AddRule(policy.Rule{Principal: operatorID, Boundary: boundary, Operation: item.name, OperationVersion: "1", Permissions: []string{operatorCap}, Priority: 100}); err != nil {
-			p.Close()
+			_ = p.Close()
 			return nil, err
 		}
 		if err := p.Resources.Grant(resource.Rule{Principal: operatorID, Boundary: boundary, Type: item.resource, ID: "*", Operations: []string{item.name}}); err != nil {
-			p.Close()
+			_ = p.Close()
 			return nil, err
 		}
 		if err := p.Fields.GrantFields(operatorID, boundary, item.name, []string{"operation", "resource", "status", "provider_reference", "tenant_id", "amount", "currency"}); err != nil {
-			p.Close()
+			_ = p.Close()
 			return nil, err
 		}
 		if err := p.Fields.GrantInputFields(operatorID, boundary, item.name, []string{"*", "customer_id", "delta"}); err != nil {
-			p.Close()
+			_ = p.Close()
 			return nil, err
 		}
 	}
