@@ -146,8 +146,11 @@ loom policy diff --from=old-policy.json --to=new-policy.json
 loom audit head --input=/var/log/loom/audit.jsonl --initial-hash="$TRUSTED_HEAD"
 loom audit verify --input=/var/log/loom/audit.jsonl --initial-hash="$TRUSTED_HEAD"
 loom audit export --input=/var/log/loom/audit.jsonl --from=100 --to=200 --initial-hash="$TRUSTED_HEAD"
+loom audit export --stream="$AUDIT_STREAM" --from=100 --to=200 --initial-hash="$TRUSTED_HEAD"
 LOOM_AUDIT_CHECKPOINT_KEY="$CHECKPOINT_KEY" loom audit checkpoint --input=/var/log/loom/audit.jsonl
-LOOM_AUDIT_CHECKPOINT_KEY="$ROTATED_KEY" loom audit rotate --input=/var/log/loom/audit.jsonl
+LOOM_AUDIT_CHECKPOINT_KEY="$CHECKPOINT_KEY" loom audit verify-checkpoint --input=/var/log/loom/audit.jsonl --checkpoint=checkpoint.json
+LOOM_AUDIT_CHECKPOINT_KEY_PREVIOUS="$RETIRED_KEY" LOOM_AUDIT_CHECKPOINT_KEY="$ROTATED_KEY" \
+  loom audit rotate --input=/var/log/loom/audit.jsonl --checkpoint=checkpoint.json
 loom recovery-worker --verifier-url=https://provider.example/recovery/verify
 loom recovery list --url=https://loom.example --token="$LOOM_TOKEN" --boundary=ops
 loom recovery requeue --execution-id="$EXECUTION_ID" --url=https://loom.example --token="$LOOM_TOKEN" --boundary=ops --idempotency-key="$IDEMPOTENCY_KEY" --approval-token="$APPROVAL_TOKEN"
@@ -158,14 +161,22 @@ loom recovery dead-letter --execution-id="$EXECUTION_ID" --url=https://loom.exam
 the same capability checks as other adapters. `audit verify` is offline and
 checks a JSONL hash chain against a trusted prior head; it does not trust a
 head read from the same untrusted file. `audit export` verifies a bounded
-segment before writing JSONL to stdout. `audit checkpoint` reads its signing
-key only from `LOOM_AUDIT_CHECKPOINT_KEY`; do not pass checkpoint keys as
-command-line arguments. `policy test` accepts the normal versioned policy
+segment before writing JSONL to stdout; `--input` reads an offline JSONL file
+and `--stream` reads the durable PostgreSQL stream, which additionally proves
+sequence continuity in the store and therefore requires `--from` and `--to`.
+`audit checkpoint` reads its signing key only from
+`LOOM_AUDIT_CHECKPOINT_KEY`; do not pass checkpoint keys as command-line
+arguments. `audit verify-checkpoint` checks a stored checkpoint against the
+events it claims to attest, so an auditor can confirm a checkpoint with the
+same tool that produced it. `policy test` accepts the normal versioned policy
 document plus a bounded `tests` array. Each fixture supplies `principal`,
 `boundary`, `operation`, optional `version` and `capabilities`, and an
-`expected` value of `allow` or `deny`. `audit rotate` creates a newly signed
-checkpoint with the currently configured signer; archive the prior checkpoint
-before rotating and use a KMS/HSM-backed secret in production. The recovery worker is documented in
+`expected` value of `allow` or `deny`. `audit rotate` re-signs an existing
+checkpoint with a new key: it verifies the prior checkpoint under
+`LOOM_AUDIT_CHECKPOINT_KEY_PREVIOUS` before signing with
+`LOOM_AUDIT_CHECKPOINT_KEY`, so the new key can only attest to history the
+retired key already covered. Archive the prior checkpoint before rotating and
+use a KMS/HSM-backed secret in production. The recovery worker is documented in
 [`RECOVERY.md`](RECOVERY.md) and never invokes a business handler.
 
 ## Incident response

@@ -101,6 +101,14 @@ func VerifyChain(events []Event, initialHash string) error {
 	return nil
 }
 
+// StreamExporter returns one contiguous, verified segment of a durable audit
+// stream. Implementations must verify the chain against trustedPreviousHash
+// and fail closed on a gap, a reordering, or a stream mismatch, so a caller
+// cannot be handed a segment that only looks intact.
+type StreamExporter interface {
+	ExportStream(ctx context.Context, streamID string, fromSequence, toSequence int64, trustedPreviousHash string) ([]Event, error)
+}
+
 // Checkpoint is a signed, portable assertion about the end of an audit
 // sequence. Store checkpoints separately from the event stream, preferably in
 // an immutable or WORM-backed retention system.

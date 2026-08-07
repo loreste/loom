@@ -79,8 +79,10 @@ func (a *Adapter) Run(ctx context.Context, args []string) int {
   loom audit head --input=/var/log/loom/audit.jsonl [--initial-hash=HASH]
   loom audit verify --input=/var/log/loom/audit.jsonl [--initial-hash=HASH]
   loom audit export --input=/var/log/loom/audit.jsonl [--from=N --to=N --initial-hash=HASH]
+  loom audit export --stream=<audit-stream> --from=N --to=N [--initial-hash=HASH]
   loom audit checkpoint --input=/var/log/loom/audit.jsonl
-  loom audit rotate --input=/var/log/loom/audit.jsonl
+  loom audit verify-checkpoint --input=/var/log/loom/audit.jsonl --checkpoint=checkpoint.json
+  loom audit rotate --input=/var/log/loom/audit.jsonl --checkpoint=checkpoint.json
   loom policy lint --input=policy.json
   loom policy test --input=policy-with-tests.json
   loom policy diff --from=old-policy.json --to=new-policy.json
@@ -132,14 +134,16 @@ func (a *Adapter) Run(ctx context.Context, args []string) int {
 			case "head":
 				return a.runAuditHead(args[2:])
 			case "export":
-				return a.runAuditExport(args[2:])
+				return a.runAuditExport(ctx, args[2:])
 			case "checkpoint":
 				return a.runAuditCheckpoint(args[2:])
+			case "verify-checkpoint":
+				return a.runAuditVerifyCheckpoint(args[2:])
 			case "rotate":
 				return a.runAuditRotate(args[2:])
 			}
 		}
-		fmt.Fprintln(a.errW(), "usage: loom audit head|verify|export|checkpoint|rotate --input=/path/audit.jsonl")
+		fmt.Fprintln(a.errW(), "usage: loom audit head|verify|export|checkpoint|verify-checkpoint|rotate --input=/path/audit.jsonl")
 		return 2
 	case "policy":
 		if len(args) > 1 {

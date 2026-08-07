@@ -59,6 +59,10 @@ type Platform struct {
 	ExecutionStatus execution.Store
 	RecoveryQueue   execution.RecoveryQueue
 	AuditSink       *audit.MemorySink
+	// AuditExport reads verified segments of the durable audit stream. It is
+	// set only when DatabaseURL is configured; the JSONL and memory sinks are
+	// not seekable by sequence.
+	AuditExport audit.StreamExporter
 	// JWTSecret used for minting demo tokens (dev only).
 	JWTSecret []byte
 	// DemoTokens contains process-local development credentials generated at
@@ -425,7 +429,9 @@ func NewPlatform(cfg Config) (*Platform, error) {
 	} else if policySrc == nil && cfg.DataDir != "" {
 		policySrc = policy.NewFileSource(persist.Path(cfg.DataDir, "policy.json"))
 	}
-	_ = pgBundle
+	if pgBundle != nil {
+		p.AuditExport = pgBundle.Audit
+	}
 
 	if err := p.registerDomains(); err != nil {
 		_ = p.Close()

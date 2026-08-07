@@ -145,14 +145,21 @@ func (a *Adapter) runAuditHead(args []string) int {
 	return writeJSON(a.outW(), result, a.errW(), "audit head")
 }
 
-// runAuditExport filters a bounded JSONL audit stream and verifies its chain
-// before writing the selected events. A segment must be checked against a
-// trusted hash supplied by the operator, never a hash from the same file.
-func (a *Adapter) runAuditExport(args []string) int {
+// runAuditExport filters a bounded audit stream and verifies its chain before
+// writing the selected events. A segment must be checked against a trusted
+// hash supplied by the operator, never a hash from the same source.
+//
+// With --stream the segment is read from the durable PostgreSQL stream, which
+// verifies sequence continuity in the store; with --input it is read from an
+// offline JSONL file.
+func (a *Adapter) runAuditExport(ctx context.Context, args []string) int {
 	flags := parseFlags(args)
+	if stream := strings.TrimSpace(flags["stream"]); stream != "" {
+		return a.runAuditExportStream(ctx, stream, flags)
+	}
 	path := strings.TrimSpace(flags["input"])
 	if path == "" {
-		fmt.Fprintln(a.errW(), "audit input path required")
+		fmt.Fprintln(a.errW(), "audit export requires --input=/path/audit.jsonl or --stream=<audit-stream>")
 		return 2
 	}
 	events, err := loadAuditEvents(path)
@@ -197,6 +204,61 @@ func (a *Adapter) runAuditExport(args []string) int {
 	return 0
 }
 
+// runAuditExportStream exports from the durable PostgreSQL audit stream. The
+// range is required: an unbounded export would defeat the store's own
+// contiguity check, which is what makes a database segment trustworthy.
+func (a *Adapter) runAuditExportStream(ctx context.Context, stream string, flags map[string]string) int {
+	if a.Platform == nil || a.Platform.AuditExport == nil {
+		fmt.Fprintln(a.errW(), "audit export --stream requires LOOM_DATABASE_URL")
+		return 2
+	}
+	from, to, err := auditRange(flags)
+	if err != nil {
+		fmt.Fprintln(a.errW(), "audit export:", err)
+		return 2
+	}
+	if from <= 0 || to <= 0 {
+		fmt.Fprintln(a.errW(), "audit export --stream requires --from and --to")
+		return 2
+	}
+	events, err := a.Platform.AuditExport.ExportStream(ctx, stream, from, to, strings.TrimSpace(flags["initial-hash"]))
+	if err != nil {
+		fmt.Fprintln(a.errW(), "audit export:", err)
+		return 1
+	}
+	encoder := json.NewEncoder(a.outW())
+	encoder.SetEscapeHTML(false)
+	for _, event := range events {
+		if err := encoder.Encode(event); err != nil {
+			fmt.Fprintln(a.errW(), "audit export: output failed")
+			return 1
+		}
+	}
+	return 0
+}
+
+// checkpointSigner loads an HMAC signer from the named environment variable.
+// Checkpoint keys are read only from the environment so they never appear in
+// a process listing or shell history.
+func (a *Adapter) checkpointSigner(command, env string) (*audit.HMACCheckpointSigner, int) {
+	keyText := strings.TrimSpace(os.Getenv(env))
+	if keyText == "" {
+		fmt.Fprintf(a.errW(), "%s requires %s\n", command, env)
+		return nil, 2
+	}
+	key, err := decodeCheckpointKey(keyText)
+	if err != nil {
+		fmt.Fprintf(a.errW(), "%s: invalid key in %s\n", command, env)
+		return nil, 2
+	}
+	signer, err := audit.NewHMACCheckpointSigner(key)
+	if err != nil {
+		fmt.Fprintf(a.errW(), "%s: invalid key in %s\n", command, env)
+		return nil, 2
+	}
+	return signer, 0
+}
+
 func (a *Adapter) runAuditCheckpoint(args []string) int {
 	flags := parseFlags(args)
 	path := strings.TrimSpace(flags["input"])
@@ -204,74 +266,101 @@ func (a *Adapter) runAuditCheckpoint(args []string) int {
 		fmt.Fprintln(a.errW(), "audit input path required")
 		return 2
 	}
-	keyText := strings.TrimSpace(os.Getenv("LOOM_AUDIT_CHECKPOINT_KEY"))
-	if keyText == "" {
-		fmt.Fprintln(a.errW(), "audit checkpoint requires LOOM_AUDIT_CHECKPOINT_KEY")
-		return 2
-	}
-	key, err := decodeCheckpointKey(keyText)
-	if err != nil {
-		fmt.Fprintln(a.errW(), "audit checkpoint: invalid key")
-		return 2
+	signer, code := a.checkpointSigner("audit checkpoint", checkpointKeyEnv)
+	if code != 0 {
+		return code
 	}
 	events, err := loadAuditEvents(path)
 	if err != nil {
 		fmt.Fprintln(a.errW(), "audit checkpoint:", err)
 		return 1
 	}
-	signer, err := audit.NewHMACCheckpointSigner(key)
-	if err != nil {
-		fmt.Fprintln(a.errW(), "audit checkpoint: invalid key")
-		return 2
-	}
 	checkpoint, err := audit.CreateCheckpoint(events, signer)
 	if err != nil {
 		fmt.Fprintln(a.errW(), "audit checkpoint: chain invalid")
 		return 1
 	}
-	if err := json.NewEncoder(a.outW()).Encode(checkpoint); err != nil {
-		fmt.Fprintln(a.errW(), "audit checkpoint: output failed")
-		return 1
-	}
-	return 0
+	return writeJSON(a.outW(), checkpoint, a.errW(), "audit checkpoint")
 }
 
-// runAuditRotate creates a new signed checkpoint with the currently supplied
-// checkpoint key. Deployments should source this key from a KMS/HSM-backed
-// secret and archive the prior checkpoint before rotation.
+// runAuditVerifyCheckpoint checks a stored checkpoint against the events it
+// claims to attest. Without this an auditor holding a signed checkpoint has no
+// way to confirm it with the tool that produced it.
+func (a *Adapter) runAuditVerifyCheckpoint(args []string) int {
+	flags := parseFlags(args)
+	path := strings.TrimSpace(flags["input"])
+	checkpointPath := strings.TrimSpace(flags["checkpoint"])
+	if path == "" || checkpointPath == "" {
+		fmt.Fprintln(a.errW(), "audit verify-checkpoint requires --input and --checkpoint")
+		return 2
+	}
+	signer, code := a.checkpointSigner("audit verify-checkpoint", checkpointKeyEnv)
+	if code != 0 {
+		return code
+	}
+	events, err := loadAuditEvents(path)
+	if err != nil {
+		fmt.Fprintln(a.errW(), "audit verify-checkpoint:", err)
+		return 1
+	}
+	checkpoint, err := loadCheckpoint(checkpointPath)
+	if err != nil {
+		fmt.Fprintln(a.errW(), "audit verify-checkpoint:", err)
+		return 1
+	}
+	if err := audit.VerifyCheckpoint(events, checkpoint, signer); err != nil {
+		fmt.Fprintln(a.errW(), "audit verify-checkpoint: invalid")
+		return 1
+	}
+	result := map[string]any{
+		"valid":           true,
+		"event_count":     checkpoint.EventCount,
+		"last_event_hash": checkpoint.LastEventHash,
+	}
+	return writeJSON(a.outW(), result, a.errW(), "audit verify-checkpoint")
+}
+
+// runAuditRotate re-signs an existing checkpoint with a new key. It verifies
+// the prior checkpoint with the retired key first: re-signing without that
+// check would let a holder of only the new key attest to a chain that was
+// never covered by the old one, which is the continuity rotation exists to
+// preserve.
 func (a *Adapter) runAuditRotate(args []string) int {
 	flags := parseFlags(args)
 	path := strings.TrimSpace(flags["input"])
-	if path == "" {
-		fmt.Fprintln(a.errW(), "audit input path required")
+	checkpointPath := strings.TrimSpace(flags["checkpoint"])
+	if path == "" || checkpointPath == "" {
+		fmt.Fprintln(a.errW(), "audit rotate requires --input and --checkpoint")
 		return 2
 	}
-	keyText := strings.TrimSpace(os.Getenv("LOOM_AUDIT_CHECKPOINT_KEY"))
-	if keyText == "" {
-		fmt.Fprintln(a.errW(), "audit rotate requires LOOM_AUDIT_CHECKPOINT_KEY")
-		return 2
+	previous, code := a.checkpointSigner("audit rotate", previousCheckpointKeyEnv)
+	if code != 0 {
+		return code
 	}
-	key, err := decodeCheckpointKey(keyText)
-	if err != nil {
-		fmt.Fprintln(a.errW(), "audit rotate: invalid key")
-		return 2
+	next, code := a.checkpointSigner("audit rotate", checkpointKeyEnv)
+	if code != 0 {
+		return code
 	}
 	events, err := loadAuditEvents(path)
 	if err != nil {
 		fmt.Fprintln(a.errW(), "audit rotate:", err)
 		return 1
 	}
-	signer, err := audit.NewHMACCheckpointSigner(key)
+	priorCheckpoint, err := loadCheckpoint(checkpointPath)
 	if err != nil {
-		fmt.Fprintln(a.errW(), "audit rotate: invalid key")
-		return 2
+		fmt.Fprintln(a.errW(), "audit rotate:", err)
+		return 1
 	}
-	checkpoint, err := audit.CreateCheckpoint(events, signer)
+	if err := audit.VerifyCheckpoint(events, priorCheckpoint, previous); err != nil {
+		fmt.Fprintln(a.errW(), "audit rotate: prior checkpoint is not valid under the retired key")
+		return 1
+	}
+	rotated, err := audit.CreateCheckpoint(events, next)
 	if err != nil {
 		fmt.Fprintln(a.errW(), "audit rotate: chain invalid")
 		return 1
 	}
-	result := map[string]any{"rotated": true, "checkpoint": checkpoint}
+	result := map[string]any{"rotated": true, "checkpoint": rotated}
 	return writeJSON(a.outW(), result, a.errW(), "audit rotate")
 }
 
@@ -294,6 +383,32 @@ func auditRange(flags map[string]string) (int64, int64, error) {
 		return 0, 0, fmt.Errorf("--to must not precede --from")
 	}
 	return from, to, nil
+}
+
+const (
+	checkpointKeyEnv         = "LOOM_AUDIT_CHECKPOINT_KEY"
+	previousCheckpointKeyEnv = "LOOM_AUDIT_CHECKPOINT_KEY_PREVIOUS"
+	maxCheckpointBytes       = 64 << 10
+)
+
+func loadCheckpoint(path string) (audit.Checkpoint, error) {
+	file, err := os.Open(path) // #nosec G304 -- explicit offline operator input
+	if err != nil {
+		return audit.Checkpoint{}, fmt.Errorf("unable to open checkpoint")
+	}
+	defer file.Close()
+	raw, err := io.ReadAll(io.LimitReader(file, maxCheckpointBytes+1))
+	if err != nil {
+		return audit.Checkpoint{}, fmt.Errorf("checkpoint read failed")
+	}
+	if int64(len(raw)) > maxCheckpointBytes {
+		return audit.Checkpoint{}, fmt.Errorf("checkpoint exceeds size limit")
+	}
+	var checkpoint audit.Checkpoint
+	if err := json.Unmarshal(raw, &checkpoint); err != nil {
+		return audit.Checkpoint{}, fmt.Errorf("invalid checkpoint JSON")
+	}
+	return checkpoint, nil
 }
 
 func decodeCheckpointKey(value string) ([]byte, error) {
