@@ -82,11 +82,14 @@ operations that application should expose.
 
 ## Status
 
-The version in [`VERSION`](VERSION) is the release source of truth. See the
-[release page](https://github.com/loreste/loom/releases) for published binary
-assets. The release includes the production OIDC verifier, while database
-isolation, provider lifecycle, secret management, and operational monitoring
-remain responsibilities of the integrating application.
+The current repository release is `v0.1.8`; [`VERSION`](VERSION) is the
+release source of truth. See the [release page](https://github.com/loreste/loom/releases)
+for published binaries, checksums, signatures, SBOM, provenance, and the signed
+container image. The release includes the production OIDC verifier, while
+database isolation, provider lifecycle, secret management, and operational
+monitoring remain responsibilities of the integrating application. The SDK
+registry publication is pending trusted-publisher configuration; source
+checkout installation is available now.
 
 ## Quick start
 
@@ -119,10 +122,13 @@ To add Loom to another Go module, use an exact release tag:
 go get github.com/loreste/loom@vX.Y.Z
 ```
 
-The Go module and Python, TypeScript/Node, and Rust SDKs are published with
-matching release versions. Install commands and local-development instructions
-are documented in [SDK.md](docs/SDK.md). Release artifacts, the signed GHCR
-image, and package provenance are documented in [RELEASES.md](docs/RELEASES.md).
+The Go module and SDK manifests are aligned to the release version. The Go
+module is available by tag. The Python, TypeScript/Node, and Rust publication
+workflow is configured but requires registry-side trusted-publisher setup;
+until that setup is complete, install those SDKs from this checkout. See
+[SDK.md](docs/SDK.md) for both paths. Published binaries, the signed GHCR
+image, and SDK publication requirements are documented in
+[RELEASES.md](docs/RELEASES.md).
 
 ## Optional protocol adapters
 

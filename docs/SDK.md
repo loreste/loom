@@ -9,10 +9,16 @@ The Go SDK supports both local in-process calls and remote HTTP calls. The
 Weft SDK is an in-process Go adapter. Python, TypeScript/Node, and Rust call
 the HTTP adapter.
 
-Published package versions are kept equal to the Loom release tag and checked
-before publication.
+Package manifests are kept equal to the Loom release tag and checked before
+publication. The publication workflow still requires trusted-publisher setup
+in each registry; version alignment alone does not mean a package is available.
 
 ## Install released SDKs
+
+Use these commands only after the release documentation confirms that the
+corresponding registry publication succeeded. For v0.1.8, install from the
+checkout using the local-development sections below while registry setup is
+pending.
 
 ```sh
 python -m pip install loom-sdk

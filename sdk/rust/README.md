@@ -3,8 +3,9 @@
 This crate is a thin HTTP client. Governance remains server-side and the SDK
 cannot grant permissions.
 
-The current repository release is used as a path dependency; it is not
-published to crates.io by the current release workflow:
+The 0.1.8 source is version-aligned with Loom, but its crates.io publication
+is pending registry trusted-publisher configuration. Use it as a path
+dependency from this checkout for now:
 
 ```toml
 [dependencies]

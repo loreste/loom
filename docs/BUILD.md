@@ -94,9 +94,10 @@ Pushing a tag matching `v*` runs the release workflow. It:
 5. creates keyless Cosign signature bundles and build-provenance attestations;
 6. publishes all release evidence with the GitHub release.
 
-The separate SDK publication workflow publishes Python, npm, and Rust packages
-after checking exact version alignment. Registry environments and trusted
-publisher settings are deployment configuration; see [`RELEASES.md`](RELEASES.md).
+The separate SDK publication workflow checks exact version alignment and then
+attempts to publish the Python, npm, and Rust packages. Publication depends on
+registry-side trusted-publisher configuration; a configured workflow does not
+mean that a package has been published. See [`RELEASES.md`](RELEASES.md).
 
 ## Security gates
 

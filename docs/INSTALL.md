@@ -102,10 +102,11 @@ policy and resource access, and call only through `app.Call`. See
 
 ## Install the SDKs
 
-The Go SDK is part of the Go module. The Python, TypeScript, and Rust SDKs are
-published with matching release versions after the tag validation gate. For a
-released package, use the registry commands in [`SDK.md`](SDK.md). For local
-development, install directly from the repository:
+The Go SDK is part of the Go module. The Python, TypeScript, and Rust SDK
+manifests are aligned with the release version, but registry publication
+depends on trusted-publisher configuration. Use registry commands only for a
+release confirmed as published in [`RELEASES.md`](RELEASES.md). Until then,
+install directly from the repository for local development:
 
 Python:
 

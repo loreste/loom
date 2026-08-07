@@ -3,8 +3,9 @@
 This is a thin HTTP client for the Loom runtime. Authorization remains
 server-side; the SDK cannot grant permissions.
 
-The current repository release installs this package from a checkout rather
-than from PyPI:
+The 0.1.8 source is version-aligned with Loom, but its PyPI publication is
+pending registry trusted-publisher configuration. Install it from this
+checkout for now:
 
 ```bash
 python3 -m venv .venv
