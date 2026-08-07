@@ -3,6 +3,12 @@ name: release
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Exact release tag to publish"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -10,27 +16,39 @@ permissions:
   id-token: write
   attestations: write
 
+env:
+  RELEASE_REF: ${{ inputs.ref || github.ref_name }}
+
 jobs:
   release-gate:
     name: release-integrity-gate
+    outputs:
+      target_sha: ${{ steps.resolve.outputs.target_sha }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          ref: ${{ env.RELEASE_REF }}
           fetch-depth: 0
-      - name: Verify tag commit and required workflows
+      - name: Verify release tag and required workflows
+        id: resolve
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -eu
-          tag_sha=$(git rev-list -n 1 "$GITHUB_REF_NAME")
-          test "$tag_sha" = "$GITHUB_SHA"
+          tag_sha=$(git rev-list -n 1 "$RELEASE_REF")
+          test -n "$tag_sha"
+          git show-ref --verify --quiet "refs/tags/$RELEASE_REF"
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            test "$tag_sha" = "$GITHUB_SHA"
+          fi
+          echo "target_sha=$tag_sha" >>"$GITHUB_OUTPUT"
           for attempt in $(seq 1 90); do
             all_ready=true
             for workflow in ci security container-scan; do
-              if ! gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$GITHUB_SHA&per_page=100" \
-                --jq ".workflow_runs[] | select(.name == \"$workflow\" and .head_sha == \"$GITHUB_SHA\" and .conclusion == \"success\") | .id" | grep -q .; then
+              if ! gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$tag_sha&per_page=100" \
+                --jq ".workflow_runs[] | select(.name == \"$workflow\" and .head_sha == \"$tag_sha\" and .conclusion == \"success\") | .id" | grep -q .; then
                 all_ready=false
                 break
               fi
@@ -40,7 +58,7 @@ jobs:
             fi
             sleep 10
           done
-          echo "required CI workflows did not all pass for $GITHUB_SHA" >&2
+          echo "required CI workflows did not all pass for $tag_sha" >&2
           exit 1
 
   binaries:
@@ -73,8 +91,8 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
-          LOOM_VERSION: ${{ github.ref_name }}
-          LOOM_COMMIT: ${{ github.sha }}
+          LOOM_VERSION: ${{ env.RELEASE_REF }}
+          LOOM_COMMIT: ${{ needs.release-gate.outputs.target_sha }}
           LOOM_BUILD_DATE: ${{ github.event.head_commit.timestamp }}
         run: ./scripts/build-release.sh
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -94,24 +112,26 @@ jobs:
         with:
           path: .
           format: cyclonedx-json
-          output-file: dist/loom-${{ github.ref_name }}-sbom.cdx.json
+          output-file: dist/loom-${{ env.RELEASE_REF }}-sbom.cdx.json
           upload-artifact: false
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: loom-release-sbom
-          path: dist/loom-${{ github.ref_name }}-sbom.cdx.json
+          path: dist/loom-${{ env.RELEASE_REF }}-sbom.cdx.json
 
   checksums:
     name: release-checksums
     needs: [release-gate, binaries]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.RELEASE_REF }}
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           pattern: loom-*
           path: dist
           merge-multiple: true
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Generate SHA-256 checksums
         run: sh ./scripts/generate-checksums.sh dist
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
