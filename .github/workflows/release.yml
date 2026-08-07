@@ -6,9 +6,45 @@ on:
 
 permissions:
   contents: write
+  actions: read
+  id-token: write
+  attestations: write
 
 jobs:
+  release-gate:
+    name: release-integrity-gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - name: Verify tag commit and required workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          tag_sha=$(git rev-list -n 1 "$GITHUB_REF_NAME")
+          test "$tag_sha" = "$GITHUB_SHA"
+          for attempt in $(seq 1 90); do
+            all_ready=true
+            for workflow in ci security container-scan; do
+              if ! gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$GITHUB_SHA&per_page=100" \
+                --jq ".workflow_runs[] | select(.name == \"$workflow\" and .head_sha == \"$GITHUB_SHA\" and .conclusion == \"success\") | .id" | grep -q .; then
+                all_ready=false
+                break
+              fi
+            done
+            if [ "$all_ready" = true ]; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "required CI workflows did not all pass for $GITHUB_SHA" >&2
+          exit 1
+
   binaries:
+    needs: release-gate
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -27,8 +63,8 @@ jobs:
           - goos: windows
             goarch: arm64
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
           go-version-file: go.mod
           cache: true
@@ -41,39 +77,100 @@ jobs:
           LOOM_COMMIT: ${{ github.sha }}
           LOOM_BUILD_DATE: ${{ github.event.head_commit.timestamp }}
         run: ./scripts/build-release.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: loom-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/loom-*
 
   sbom:
     name: release-sbom
-    needs: binaries
+    needs: [release-gate, binaries]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Prepare SBOM output
         run: mkdir -p dist
-      - uses: anchore/sbom-action@v0.20.5
+      - uses: anchore/sbom-action@da167eac915b4e86f08b264dbdbc867b61be6f0c
         with:
           path: .
           format: cyclonedx-json
           output-file: dist/loom-${{ github.ref_name }}-sbom.cdx.json
           upload-artifact: false
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: loom-release-sbom
           path: dist/loom-${{ github.ref_name }}-sbom.cdx.json
 
-  publish:
-    needs: [binaries, sbom]
+  checksums:
+    name: release-checksums
+    needs: [release-gate, binaries]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: loom-*
+          path: dist
+          merge-multiple: true
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Generate SHA-256 checksums
+        run: sh ./scripts/generate-checksums.sh dist
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: loom-release-checksums
+          path: dist/SHA256SUMS
+
+  signatures:
+    name: release-signatures
+    needs: [release-gate, binaries]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: loom-*
+          path: dist
+          merge-multiple: true
+      - uses: sigstore/cosign-installer@d7d6bc7722e3daa8354c50bcb52f4837da5e9b6a
+      - name: Sign release binaries with keyless Cosign
+        env:
+          COSIGN_YES: "true"
+        run: |
+          set -eu
+          for asset in dist/loom-*; do
+            [ -f "$asset" ] || continue
+            case "$asset" in
+              *.json) continue ;;
+            esac
+            cosign sign-blob --yes --bundle "$asset.sigstore.json" "$asset"
+          done
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: loom-release-signatures
+          path: dist/*.sigstore.json
+
+  provenance:
+    name: release-provenance
+    needs: [release-gate, binaries, sbom]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: loom-*
+          path: dist
+          merge-multiple: true
+      - name: Attest release subjects
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be
+        with:
+          subject-path: dist/loom-*
+
+  publish:
+    needs: [release-gate, binaries, sbom, checksums, signatures, provenance]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           path: dist
           pattern: loom-*
           merge-multiple: true
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
         with:
           files: dist/loom-*

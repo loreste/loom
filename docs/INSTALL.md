@@ -161,9 +161,12 @@ export LOOM_JWT_ISSUER='https://issuer.example'
 export LOOM_JWT_AUDIENCE='loom-api'
 ```
 
-The built-in verifier supports configured HMAC JWT verification. OIDC discovery,
-JWKS rotation, revocation, and enterprise identity lifecycle remain application
-integration responsibilities; see [`IDENTITY.md`](IDENTITY.md).
+The built-in verifier supports configured HMAC JWT verification. Applications
+that need OIDC discovery and JWKS rotation should embed `identity/oidc` and
+configure issuer, audience, algorithm allowlist, response limits, claim
+mapping, and revocation behavior explicitly. Provider lifecycle and enterprise
+identity administration remain application responsibilities; see
+[`IDENTITY.md`](IDENTITY.md).
 
 For a single node, `LOOM_DATA_DIR` provides file-backed approvals, idempotency,
 execution status, and audit state. For multiple replicas, set

@@ -48,8 +48,10 @@ PostgreSQL or file data directory, Redis, and a JWT secret.
 | `LOOM_JWT_AUDIENCE` | empty | Expected JWT audience. Required in production-like profiles. |
 | `LOOM_TENANT_CLAIM` | empty | Verified JWT claim copied to Loom's `tenant_id` attribute. |
 
-The built-in verifier is not an OIDC discovery or JWKS-rotation service. See
-[`IDENTITY.md`](IDENTITY.md) for the production integration requirements.
+The built-in HMAC verifier is intended for controlled deployments and tests.
+Embed `identity/oidc` for OIDC discovery and JWKS rotation, and configure its
+issuer, audience, algorithm allowlist, response limits, and claim mappings
+explicitly. See [`IDENTITY.md`](IDENTITY.md) for the production requirements.
 
 ## Policy synchronization
 

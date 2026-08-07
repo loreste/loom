@@ -49,6 +49,11 @@ CREATE TABLE IF NOT EXISTS loom_executions (
     idempotency_key       TEXT NOT NULL DEFAULT '',
     fingerprint           TEXT NOT NULL DEFAULT '',
     recovery_queued       BOOLEAN NOT NULL DEFAULT FALSE,
+    recovery_attempt      INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at       TIMESTAMPTZ,
+    last_failure_category TEXT NOT NULL DEFAULT '',
+    last_failure_summary  TEXT NOT NULL DEFAULT '',
+    recovery_escalated    BOOLEAN NOT NULL DEFAULT FALSE,
     reconciliation_note   TEXT NOT NULL DEFAULT '',
     started_at            TIMESTAMPTZ NOT NULL,
     updated_at            TIMESTAMPTZ NOT NULL,
@@ -60,8 +65,16 @@ CREATE TABLE IF NOT EXISTS loom_executions (
 
 CREATE INDEX IF NOT EXISTS idx_loom_executions_recovery
     ON loom_executions (recovery_queued, recovery_lease_until);
+CREATE INDEX IF NOT EXISTS idx_loom_executions_next_attempt
+    ON loom_executions (recovery_queued, next_attempt_at, updated_at);
 CREATE INDEX IF NOT EXISTS idx_loom_executions_updated
     ON loom_executions (updated_at DESC);
+
+ALTER TABLE loom_executions ADD COLUMN IF NOT EXISTS recovery_attempt INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE loom_executions ADD COLUMN IF NOT EXISTS next_attempt_at TIMESTAMPTZ;
+ALTER TABLE loom_executions ADD COLUMN IF NOT EXISTS last_failure_category TEXT NOT NULL DEFAULT '';
+ALTER TABLE loom_executions ADD COLUMN IF NOT EXISTS last_failure_summary TEXT NOT NULL DEFAULT '';
+ALTER TABLE loom_executions ADD COLUMN IF NOT EXISTS recovery_escalated BOOLEAN NOT NULL DEFAULT FALSE;
 
 -- Archive keeps terminal execution history separate from the hot status table.
 -- Applications can export this table to their long-term retention system.

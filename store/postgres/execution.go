@@ -46,6 +46,7 @@ func scanExecutionRecord(row rowScanner) (execution.Record, int64, string, time.
 		leaseID     sql.NullString
 		leaseOwner  sql.NullString
 		leaseUntil  sql.NullTime
+		nextAttempt sql.NullTime
 	)
 	err := row.Scan(
 		&record.ExecutionID,
@@ -59,6 +60,11 @@ func scanExecutionRecord(row rowScanner) (execution.Record, int64, string, time.
 		&record.IdempotencyKey,
 		&record.Fingerprint,
 		&record.RecoveryQueued,
+		&record.RecoveryAttempt,
+		&nextAttempt,
+		&record.LastFailureCategory,
+		&record.LastFailureSummary,
+		&record.RecoveryEscalated,
 		&record.ReconciliationNote,
 		&record.StartedAt,
 		&record.UpdatedAt,
@@ -79,20 +85,33 @@ func scanExecutionRecord(row rowScanner) (execution.Record, int64, string, time.
 	if !leaseUntil.Valid {
 		leaseUntil.Time = time.Time{}
 	}
+	if !nextAttempt.Valid {
+		nextAttempt.Time = time.Time{}
+	}
+	record.NextAttemptAt = nextAttempt.Time
 	return record, revision, leaseOwner.String, leaseUntil.Time, nil
 }
 
 const executionColumns = `
     execution_id, operation, operation_version, principal, boundary,
     outcome, state, response, idempotency_key, fingerprint,
-    recovery_queued, reconciliation_note, started_at, updated_at, revision,
-    recovery_lease_id, recovery_lease_owner, recovery_lease_until`
+	recovery_queued, recovery_attempt, next_attempt_at, last_failure_category,
+	last_failure_summary, recovery_escalated, reconciliation_note,
+	started_at, updated_at, revision,
+	recovery_lease_id, recovery_lease_owner, recovery_lease_until`
 
 func validateExecutionRecord(record execution.Record) error {
 	if record.ExecutionID == "" || record.OperationVersion == "" || record.State == "" {
 		return fmt.Errorf("%w: execution record requires id, operation version, and state", core.ErrInvalidArgument)
 	}
 	return nil
+}
+
+func nullableTime(value time.Time) any {
+	if value.IsZero() {
+		return nil
+	}
+	return value.UTC()
 }
 
 // Put inserts one immutable execution record. An execution ID collision is an
@@ -117,13 +136,15 @@ func (s *ExecutionStore) Put(ctx context.Context, record execution.Record) error
 	}
 	result, err := s.db.ExecContext(ctx, `
 		INSERT INTO loom_executions (`+executionColumns+`)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,1,NULL,NULL,NULL)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,1,NULL,NULL,NULL)
 		ON CONFLICT (execution_id) DO NOTHING
 	`,
 		record.ExecutionID, record.Operation, record.OperationVersion, record.Principal,
 		record.Boundary, record.Outcome, record.State, responseRaw, record.IdempotencyKey,
-		record.Fingerprint, record.RecoveryQueued, record.ReconciliationNote,
-		record.StartedAt.UTC(), record.UpdatedAt.UTC(),
+		record.Fingerprint, record.RecoveryQueued, record.RecoveryAttempt,
+		nullableTime(record.NextAttemptAt), record.LastFailureCategory,
+		record.LastFailureSummary, record.RecoveryEscalated,
+		record.ReconciliationNote, record.StartedAt.UTC(), record.UpdatedAt.UTC(),
 	)
 	if err != nil {
 		return err
@@ -370,8 +391,9 @@ func (s *ExecutionStore) ClaimRecovery(ctx context.Context, owner string, lease 
 	row := tx.QueryRowContext(ctx, `
         SELECT `+executionColumns+`
         FROM loom_executions
-        WHERE recovery_queued = TRUE
-          AND (recovery_lease_until IS NULL OR recovery_lease_until <= NOW())
+		WHERE recovery_queued = TRUE
+		AND (next_attempt_at IS NULL OR next_attempt_at <= NOW())
+		AND (recovery_lease_until IS NULL OR recovery_lease_until <= NOW())
         ORDER BY updated_at ASC
         FOR UPDATE SKIP LOCKED
         LIMIT 1
@@ -385,8 +407,9 @@ func (s *ExecutionStore) ClaimRecovery(ctx context.Context, owner string, lease 
 	}
 	result, err := tx.ExecContext(ctx, `
         UPDATE loom_executions
-        SET recovery_lease_id = $2, recovery_lease_owner = $3,
-            recovery_lease_until = $4, updated_at = NOW(), revision = revision + 1
+		SET recovery_lease_id = $2, recovery_lease_owner = $3,
+			recovery_lease_until = $4, recovery_attempt = recovery_attempt + 1,
+			next_attempt_at = NULL, updated_at = NOW(), revision = revision + 1
         WHERE execution_id = $1 AND revision = $5
     `, record.ExecutionID, leaseID, owner, expires, revision)
 	if err != nil {
@@ -398,8 +421,107 @@ func (s *ExecutionStore) ClaimRecovery(ctx context.Context, owner string, lease 
 	if err := tx.Commit(); err != nil {
 		return execution.RecoveryLease{}, false, err
 	}
+	record.RecoveryAttempt++
+	record.NextAttemptAt = time.Time{}
 	record.UpdatedAt = time.Now().UTC()
 	return execution.RecoveryLease{Record: record, Owner: owner, LeaseID: leaseID, ExpiresAt: expires}, true, nil
+}
+
+// RenewRecovery extends a live lease only when both execution ID and lease ID
+// still match. A stale worker cannot extend a reclaimed record.
+func (s *ExecutionStore) RenewRecovery(ctx context.Context, id, leaseID string, lease time.Duration) (time.Time, error) {
+	if s == nil || s.db == nil || id == "" || leaseID == "" {
+		return time.Time{}, fmt.Errorf("%w: execution id and lease id required", core.ErrInvalidArgument)
+	}
+	if err := ctx.Err(); err != nil {
+		return time.Time{}, err
+	}
+	if lease <= 0 {
+		lease = defaultRecoveryLease
+	}
+	expires := time.Now().UTC().Add(lease)
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE loom_executions
+		SET recovery_lease_until = $3, updated_at = NOW(), revision = revision + 1
+		WHERE execution_id = $1 AND recovery_lease_id = $2
+		  AND recovery_queued = TRUE AND recovery_lease_until > NOW()
+	`, id, leaseID, expires)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if changed, _ := result.RowsAffected(); changed != 1 {
+		return time.Time{}, fmt.Errorf("%w: recovery lease is stale or owned by another worker", core.ErrNotFound)
+	}
+	return expires, nil
+}
+
+// ScheduleRecovery records bounded retry state and releases the live lease in
+// one guarded update. The item remains queued until the next attempt is due.
+func (s *ExecutionStore) ScheduleRecovery(ctx context.Context, id, leaseID string, next time.Time, category, summary string) (execution.Record, error) {
+	if s == nil || s.db == nil || id == "" || leaseID == "" || next.IsZero() {
+		return execution.Record{}, fmt.Errorf("%w: recovery schedule arguments required", core.ErrInvalidArgument)
+	}
+	if err := ctx.Err(); err != nil {
+		return execution.Record{}, err
+	}
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE loom_executions
+		SET next_attempt_at = $3, last_failure_category = $4,
+		    last_failure_summary = $5, recovery_lease_id = NULL,
+		    recovery_lease_owner = NULL, recovery_lease_until = NULL,
+		    updated_at = NOW(), revision = revision + 1
+		WHERE execution_id = $1 AND recovery_lease_id = $2
+		  AND recovery_queued = TRUE
+	`, id, leaseID, next.UTC(), category, summary)
+	if err != nil {
+		return execution.Record{}, err
+	}
+	if changed, _ := result.RowsAffected(); changed != 1 {
+		return execution.Record{}, fmt.Errorf("%w: recovery lease is stale or owned by another worker", core.ErrNotFound)
+	}
+	record, ok, err := s.Get(ctx, id)
+	if err != nil {
+		return execution.Record{}, err
+	}
+	if !ok {
+		return execution.Record{}, fmt.Errorf("%w: execution %s", core.ErrNotFound, id)
+	}
+	return record, nil
+}
+
+// DeadLetterRecovery moves an uncertain execution to operator review and
+// clears its live lease. It is intentionally not reversible by a worker; an
+// approved administrative operation must explicitly requeue it.
+func (s *ExecutionStore) DeadLetterRecovery(ctx context.Context, id, leaseID, category, summary string) (execution.Record, error) {
+	if s == nil || s.db == nil || id == "" || leaseID == "" {
+		return execution.Record{}, fmt.Errorf("%w: recovery dead-letter arguments required", core.ErrInvalidArgument)
+	}
+	if err := ctx.Err(); err != nil {
+		return execution.Record{}, err
+	}
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE loom_executions
+		SET state = $3, recovery_queued = FALSE, recovery_escalated = TRUE,
+		    last_failure_category = $4, last_failure_summary = $5,
+		    recovery_lease_id = NULL, recovery_lease_owner = NULL,
+		    recovery_lease_until = NULL, next_attempt_at = NULL,
+		    updated_at = NOW(), revision = revision + 1
+		WHERE execution_id = $1 AND recovery_lease_id = $2
+	`, id, leaseID, execution.StateOperatorReview, category, summary)
+	if err != nil {
+		return execution.Record{}, err
+	}
+	if changed, _ := result.RowsAffected(); changed != 1 {
+		return execution.Record{}, fmt.Errorf("%w: recovery lease is stale or owned by another worker", core.ErrNotFound)
+	}
+	record, ok, err := s.Get(ctx, id)
+	if err != nil {
+		return execution.Record{}, err
+	}
+	if !ok {
+		return execution.Record{}, fmt.Errorf("%w: execution %s", core.ErrNotFound, id)
+	}
+	return record, nil
 }
 
 // ReleaseRecovery releases a lease. completed removes the item from the
@@ -547,4 +669,6 @@ func (s *ExecutionStore) Purge(ctx context.Context, before time.Time) (int64, er
 
 var _ execution.Store = (*ExecutionStore)(nil)
 var _ execution.RecoveryQueue = (*ExecutionStore)(nil)
+var _ execution.RecoveryHeartbeat = (*ExecutionStore)(nil)
+var _ execution.RecoveryScheduler = (*ExecutionStore)(nil)
 var _ idempotency.RecoveryQueue = (*ExecutionStore)(nil)

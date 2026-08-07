@@ -15,8 +15,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
           go-version-file: go.mod
           cache: true
@@ -25,7 +25,7 @@ jobs:
           set -o pipefail
           go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./... 2>&1 | tee /tmp/govulncheck.log
       - if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: govulncheck-log
           path: /tmp/govulncheck.log
@@ -35,8 +35,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
           go-version-file: go.mod
           cache: true
@@ -48,10 +48,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@v2
+      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -74,22 +74,22 @@ jobs:
           - language: python
             build-mode: none
     steps:
-      - uses: actions/checkout@v4
-      - uses: github/codeql-action/init@v3
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: github/codeql-action/init@c4dd10e44af883a891fe31ced449bcb4a6728b9b
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
       - if: matrix.build-mode == 'autobuild'
-        uses: github/codeql-action/autobuild@v3
-      - uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/autobuild@c4dd10e44af883a891fe31ced449bcb4a6728b9b
+      - uses: github/codeql-action/analyze@c4dd10e44af883a891fe31ced449bcb4a6728b9b
 
   sbom:
     name: sbom
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: anchore/sbom-action@v0.20.5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: anchore/sbom-action@da167eac915b4e86f08b264dbdbc867b61be6f0c
         with:
           path: .
           format: cyclonedx-json
