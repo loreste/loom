@@ -4,8 +4,9 @@ The TypeScript SDK is a thin HTTP client. Loom remains responsible for
 authentication, authorization, guardrails, approvals, quotas, idempotency,
 execution, filtering, and audit.
 
-The current repository release is installed from a checkout rather than from
-the npm registry:
+The 0.1.8 source is version-aligned with Loom, but its npm publication is
+pending registry trusted-publisher configuration. Install it from this
+checkout for now:
 
 ```bash
 cd sdk/typescript
