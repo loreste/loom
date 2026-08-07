@@ -41,6 +41,12 @@ discovery/JWKS counters through `Health()`; export those values through the
 application's approved observability integration without adding tokens,
 subjects, tenant IDs, or raw claims to labels.
 
+`NewVerifier` performs issuer discovery and fetches the key set before it
+returns, so an unreachable issuer or JWKS endpoint fails at startup rather than
+on a caller's first authenticated request. Pass `verifier.ReadyCheck()` to
+`bootstrap.Config.ReadyChecks` so `/readyz` reflects verifier state; see
+[OPERATIONS.md](OPERATIONS.md).
+
 For a generic provider, configure its issuer URL, client audience, and the
 provider's documented claim names. For Keycloak, use the realm issuer URL and
 map the configured realm claim or protocol mapper to the boundary claim; do

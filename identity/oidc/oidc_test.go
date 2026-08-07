@@ -394,3 +394,21 @@ func requestURLIssuer(request *http.Request) string {
 // nilContext keeps the tests explicit without allowing a nil context into
 // the production verifier API.
 func nilContext() context.Context { return context.Background() }
+
+func TestVerifierReadyCheckReflectsDiscoveryAndJWKS(t *testing.T) {
+	// A zero-value verifier has completed neither discovery nor a JWKS
+	// refresh, so it must report unready rather than defaulting to ready.
+	if err := (&Verifier{}).ReadyCheck()(nilContext()); err == nil {
+		t.Fatal("unconfigured verifier reported ready")
+	}
+	clock := time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
+	server, _ := newOIDCTestServer(t)
+	defer server.Close()
+	verifier := newTestVerifier(t, server, clock, Config{})
+	if health := verifier.Health(); !health.Ready {
+		t.Fatalf("Health() = %+v, want ready after successful discovery and JWKS refresh", health)
+	}
+	if err := verifier.ReadyCheck()(nilContext()); err != nil {
+		t.Fatalf("ReadyCheck() = %v, want nil for a discovered verifier", err)
+	}
+}

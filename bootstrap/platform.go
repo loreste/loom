@@ -129,6 +129,15 @@ type Config struct {
 	// TenantResolver binds a verified identity tenant claim to each request
 	// boundary. Leave nil for applications that do not use tenant claims.
 	TenantResolver runtime.TenantResolver
+
+	// ReadyChecks are additional readiness probes run by Platform.Ready
+	// alongside the built-in PostgreSQL and Redis checks. Applications that
+	// construct their own identity verifier must register it here; Loom cannot
+	// probe a dependency it did not build. An OIDC deployment should add a
+	// check that fails while oidc.Verifier.Health().Ready is false, so a
+	// process that has never reached its issuer fails /readyz instead of
+	// serving traffic that denies every authenticated request.
+	ReadyChecks []func(context.Context) error
 }
 
 // NewPlatform builds deny-by-default stack with demo principals and domain ops.
@@ -357,6 +366,12 @@ func NewPlatform(cfg Config) (*Platform, error) {
 		}
 		_ = closeAll(db, rdb)
 		return nil, err
+	}
+
+	for _, check := range cfg.ReadyChecks {
+		if check != nil {
+			readyFns = append(readyFns, check)
+		}
 	}
 
 	ready := func(ctx context.Context) error {

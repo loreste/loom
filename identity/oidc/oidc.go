@@ -128,7 +128,47 @@ func NewVerifier(ctx context.Context, cfg Config) (*Verifier, error) {
 		SupportedSigningAlgs: append([]string(nil), cfg.AllowedAlgorithms...),
 		Now:                  cfg.Now,
 	})
+	// Fetch the key set now. go-oidc otherwise loads it lazily on the first
+	// token, which would leave Health().Ready false until real traffic
+	// arrived — a readiness probe that can never pass. Failing here also
+	// surfaces an unreachable JWKS endpoint at startup rather than on a
+	// caller's first authenticated request.
+	if err := prefetchJWKS(providerCtx, client, provider); err != nil {
+		return nil, fmt.Errorf("identity/oidc: jwks fetch failed: %w", err)
+	}
 	return &Verifier{verifier: verifier, cfg: cfg, health: health}, nil
+}
+
+// prefetchJWKS reads the key set through the bounded client so the size limit
+// and readiness counters apply exactly as they do to a refresh.
+func prefetchJWKS(ctx context.Context, client *http.Client, provider *gooidc.Provider) error {
+	var metadata struct {
+		JWKSURL string `json:"jwks_uri"`
+	}
+	if err := provider.Claims(&metadata); err != nil {
+		return err
+	}
+	if strings.TrimSpace(metadata.JWKSURL) == "" {
+		return fmt.Errorf("discovery document does not advertise jwks_uri")
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, metadata.JWKSURL, nil)
+	if err != nil {
+		return err
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = response.Body.Close() }()
+	// Drain to EOF: the bounded body records the refresh outcome on the final
+	// read, so an unread body would leave the counters untouched.
+	if _, err := io.Copy(io.Discard, response.Body); err != nil {
+		return err
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return fmt.Errorf("jwks endpoint returned %s", response.Status)
+	}
+	return nil
 }
 
 func validateConfig(cfg *Config) error {
@@ -356,6 +396,19 @@ func (v *Verifier) Health() Health {
 		JWKSRefreshFailures:     v.health.jwksFailures.Load(),
 		Authentications:         v.health.authentications.Load(),
 		RejectedAuthentications: v.health.rejected.Load(),
+	}
+}
+
+// ReadyCheck adapts Health to a readiness probe for bootstrap.Config.
+// ReadyChecks. It fails while the verifier has not completed both issuer
+// discovery and a JWKS refresh, so a process that cannot reach its issuer is
+// reported unready rather than denying every authenticated request.
+func (v *Verifier) ReadyCheck() func(context.Context) error {
+	return func(context.Context) error {
+		if !v.Health().Ready {
+			return fmt.Errorf("identity/oidc: verifier has not completed discovery and JWKS refresh")
+		}
+		return nil
 	}
 }
 

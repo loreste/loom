@@ -48,6 +48,13 @@ required audit sink is unavailable.
 Treat readiness failures as deployment events. Do not route production traffic
 to an instance whose durable security dependencies are not ready.
 
+`/readyz` probes PostgreSQL and Redis automatically. It cannot probe a
+dependency the application constructed itself, including an identity verifier.
+Register those through `bootstrap.Config.ReadyChecks`; an OIDC deployment
+should pass `verifier.ReadyCheck()`, which fails until issuer discovery and the
+JWKS fetch have both succeeded. Without it, a process that never reached its
+identity provider reports ready and then denies every authenticated request.
+
 ## Side-effect failure handling
 
 Every side-effecting operation should use idempotency. If Loom returns
