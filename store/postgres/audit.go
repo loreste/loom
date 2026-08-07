@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/loreste/loom/audit"
 	"github.com/loreste/loom/core"
@@ -185,6 +186,12 @@ func (s *AuditSink) assignChain(ctx context.Context, tx *sql.Tx, ev audit.Event)
 	ev.Sequence = nextSequence
 	ev.PrevEventHash = headHash
 	ev.CheckpointID = checkpointID
+	// PostgreSQL TIMESTAMPTZ holds microseconds and rounds anything finer.
+	// Hashing a nanosecond timestamp would therefore commit to a value the
+	// database cannot return, and every exported segment would fail
+	// verification. Rounding here makes the hashed value identical to the
+	// stored one, and leaves nothing for the server to round.
+	ev.Timestamp = ev.Timestamp.UTC().Round(time.Microsecond)
 	ev.EventHash = ""
 	hash, err := audit.HashEvent(ev)
 	if err != nil {
