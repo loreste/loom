@@ -30,6 +30,23 @@ The container job uses the repository-scoped `GITHUB_TOKEN` for GHCR and keyless
 Cosign identity from GitHub OIDC. No registry credentials are baked into the
 image or release artifacts.
 
+Configure the three package registries with these exact trusted-publisher values
+before running SDK publication:
+
+- PyPI: owner `loreste`, repository `loom`, workflow `sdk-publish.yml`,
+  environment `pypi`.
+- npm: owner or organization `loreste`, repository `loom`, workflow
+  `sdk-publish.yml`, environment `npm`; do not add a token secret.
+- crates.io: GitHub repository `loreste/loom`, workflow `sdk-publish.yml`,
+  environment `crates-io`.
+
+The workflow must be allowed to request an OIDC token (`id-token: write`). If a
+registry reports `invalid-publisher` or `No Trusted Publishing config found`,
+the registry-side publisher has not been registered yet. After registration,
+rerun the tag publication workflow with:
+
+    gh workflow run sdk-publish.yml --ref main -f ref=vX.Y.Z
+
 ## Release gate
 
 Tag pushes run Go CI, security scanning, and container scanning for the exact
