@@ -30,6 +30,11 @@ func TestPlatformPostgresEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// The approval token must be unique per run: reissuing a token that is
+	// already stored fails, so a fixed value only works against a database
+	// that is recreated between runs.
+	approvalToken := "pg-plat-appr-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+
 	// Approver issues via governed op
 	iss := p.Runtime.Execute(context.Background(), core.Request{
 		Operation:   "approval.issue",
@@ -39,7 +44,7 @@ func TestPlatformPostgresEndToEnd(t *testing.T) {
 			"principal": "user:bob",
 			"operation": "payment.capture",
 			"boundary":  "dev",
-			"token":     "pg-plat-appr",
+			"token":     approvalToken,
 		},
 		IdempotencyKey: "pg-iss-" + strconv.FormatInt(time.Now().UnixNano(), 10),
 	})
@@ -63,7 +68,7 @@ func TestPlatformPostgresEndToEnd(t *testing.T) {
 			"amount": 7.0, "currency": "USD", "merchant_id": "m",
 		},
 		IdempotencyKey: "pg-pay-1",
-		ApprovalToken:  "pg-plat-appr",
+		ApprovalToken:  approvalToken,
 	})
 	if !pay.Allowed {
 		t.Fatalf("pay: %+v", pay.Denial)

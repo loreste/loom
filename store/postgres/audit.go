@@ -66,10 +66,10 @@ func (s *AuditSink) ExportStream(ctx context.Context, streamID string, fromSeque
 		}
 		var event audit.Event
 		if err := json.Unmarshal(raw, &event); err != nil {
-			return nil, fmt.Errorf("audit export: decode event: %w", err)
+			return nil, fmt.Errorf("decode event: %w", err)
 		}
 		if event.AuditStream != streamID || event.Sequence < fromSequence || event.Sequence > toSequence {
-			return nil, fmt.Errorf("audit export: event is outside requested stream or range")
+			return nil, fmt.Errorf("event is outside the requested stream or range")
 		}
 		events = append(events, event)
 	}
@@ -78,16 +78,16 @@ func (s *AuditSink) ExportStream(ctx context.Context, streamID string, fromSeque
 	}
 	expected := toSequence - fromSequence + 1
 	if int64(len(events)) != expected {
-		return nil, fmt.Errorf("audit export: incomplete sequence range: got %d events, want %d", len(events), expected)
+		return nil, fmt.Errorf("incomplete sequence range: got %d events, want %d", len(events), expected)
 	}
 	for index, event := range events {
 		wantSequence := fromSequence + int64(index)
 		if event.Sequence != wantSequence {
-			return nil, fmt.Errorf("audit export: sequence gap or reordering at %d", wantSequence)
+			return nil, fmt.Errorf("sequence gap or reordering at %d", wantSequence)
 		}
 	}
 	if err := audit.VerifyChain(events, trustedPreviousHash); err != nil {
-		return nil, fmt.Errorf("audit export: verify chain: %w", err)
+		return nil, fmt.Errorf("verify chain: %w", err)
 	}
 	return events, nil
 }

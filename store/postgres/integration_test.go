@@ -3,6 +3,7 @@ package postgres_test
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"os"
@@ -27,6 +28,18 @@ func dsn(t *testing.T) string {
 		t.Skip("LOOM_DATABASE_URL not set; skip postgres integration")
 	}
 	return u
+}
+
+// clearRecoveryQueue removes execution rows left by earlier runs so that
+// tests asserting on queue contents are repeatable against a database that is
+// not recreated between runs. CI uses a fresh container, but a developer
+// pointing LOOM_DATABASE_URL at a persistent database otherwise sees failures
+// that have nothing to do with the code under test.
+func clearRecoveryQueue(t *testing.T, db *sql.DB) {
+	t.Helper()
+	if _, err := db.Exec(`DELETE FROM loom_executions WHERE recovery_queued = TRUE OR state = 'operator_review'`); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestPostgresApprovalIdempotencyAudit(t *testing.T) {
@@ -182,6 +195,7 @@ func TestPostgresExecutionReconcileAndRecoveryLease(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = b.Close() })
+	clearRecoveryQueue(t, b.DB)
 
 	id := "pg-execution-" + strconv.FormatInt(time.Now().UnixNano(), 10)
 	record := execution.Record{

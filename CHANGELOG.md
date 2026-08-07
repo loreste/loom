@@ -6,6 +6,43 @@ All notable changes to Loom are documented here. The format follows
 
 ## [Unreleased]
 
+### Breaking
+
+- `loom audit rotate` now requires `--checkpoint` and
+  `LOOM_AUDIT_CHECKPOINT_KEY_PREVIOUS`. It verifies the prior checkpoint under
+  the retired key before re-signing with the current key; previously it
+  re-signed without checking anything, so the new key could attest to history
+  the retired key never covered. Existing invocations exit 2 until updated.
+- `runtime.Metrics.ObserveRecovery` is replaced by `ObserveRecoveryQueue`
+  (depth and oldest age) and `ObserveRecoveryProgress` (attempts, renewals,
+  dead letters). The combined signature forced a caller that knew only the
+  counters to pass a zero depth, silently resetting a gauge set elsewhere.
+- `oidc.NewVerifier` now fetches the JWKS during construction, so an
+  unreachable key endpoint fails at startup rather than on the first
+  authenticated request.
+
+### Added
+
+- `loom audit verify-checkpoint` checks a stored checkpoint against the events
+  it attests, so an auditor can confirm one with the tool that produced it.
+- `loom audit export --stream` exports a verified segment from the durable
+  PostgreSQL audit stream; `--from` and `--to` are required.
+- `bootstrap.Config.ReadyChecks` registers application-owned readiness probes,
+  and `oidc.Verifier.ReadyCheck` plugs the verifier into `/readyz`.
+
+### Fixed
+
+- Durable-store and recovery metrics were exported but never written, so
+  `loom_recovery_depth` and the durable-store series read zero forever while
+  the documentation recommended alerting on them. The runtime now reports
+  execution-status write latency and failures, and the recovery worker reports
+  queue depth, oldest-record age, attempts, renewals, and dead letters.
+- `loom_execute_duration_seconds` was missing `_sum`, so average latency could
+  not be computed from the histogram.
+- `/readyz` reported ready when an application-supplied identity verifier had
+  never reached its issuer, serving traffic that denied every authenticated
+  request.
+
 ### Changed
 
 - Release reruns can target an existing immutable tag and publish the requested
