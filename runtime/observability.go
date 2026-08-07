@@ -50,6 +50,13 @@ type ActiveObserver interface {
 	End()
 }
 
+// DurableStoreObserver is an optional extension for durable-store latency and
+// failure aggregates. Runtime calls it around execution-status writes;
+// observers that do not need storage metrics may implement only Observer.
+type DurableStoreObserver interface {
+	ObserveDurableStore(duration time.Duration, failed bool)
+}
+
 // ObserverFunc adapts a function to Observer.
 type ObserverFunc func(Observation)
 
@@ -179,9 +186,11 @@ func (m *Metrics) ObserveDurableStore(duration time.Duration, failed bool) {
 	m.mu.Unlock()
 }
 
-// ObserveRecovery records aggregate queue health supplied by a recovery
-// worker or deployment monitor. Values are gauges/counters, never labels.
-func (m *Metrics) ObserveRecovery(depth int64, oldestAge time.Duration, attempts, renewals, deadLetters int64) {
+// ObserveRecoveryQueue records queue gauges sampled from the durable store.
+// Gauges and counters are split across two methods because a caller that
+// knows only one of them would otherwise have to pass zero for the other and
+// silently reset it.
+func (m *Metrics) ObserveRecoveryQueue(depth int64, oldestAge time.Duration) {
 	if m == nil {
 		return
 	}
@@ -194,6 +203,16 @@ func (m *Metrics) ObserveRecovery(depth int64, oldestAge time.Duration, attempts
 	m.mu.Lock()
 	m.recoveryDepth = depth
 	m.recoveryOldestAge = oldestAge
+	m.mu.Unlock()
+}
+
+// ObserveRecoveryProgress records work a recovery worker completed. Values are
+// aggregate counters, never labels.
+func (m *Metrics) ObserveRecoveryProgress(attempts, renewals, deadLetters int64) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
 	m.recoveryAttempts += maxNonNegative(attempts)
 	m.recoveryRenewals += maxNonNegative(renewals)
 	m.recoveryDeadLetters += maxNonNegative(deadLetters)
@@ -258,14 +277,20 @@ func (m *Metrics) Prometheus() string {
 	b.WriteString("# HELP loom_execute_denied_total Governed executions denied by the pipeline.\n")
 	b.WriteString("# TYPE loom_execute_denied_total counter\n")
 	fmt.Fprintf(&b, "loom_execute_denied_total %d\n", m.denied)
+	// Deprecated: superseded by loom_execute_duration_seconds_sum, which
+	// carries the same value. Retained so existing scrapers keep working.
 	b.WriteString("# HELP loom_execute_duration_seconds_total Cumulative execution duration.\n")
 	b.WriteString("# TYPE loom_execute_duration_seconds_total counter\n")
 	fmt.Fprintf(&b, "loom_execute_duration_seconds_total %f\n", m.duration.Seconds())
+	// _sum and _count complete the histogram family; a histogram without _sum
+	// cannot answer rate(_sum)/rate(_count) for average latency.
+	b.WriteString("# HELP loom_execute_duration_seconds Governed execution duration.\n")
 	b.WriteString("# TYPE loom_execute_duration_seconds histogram\n")
 	for index, boundary := range durationBucketSeconds {
 		fmt.Fprintf(&b, "loom_execute_duration_seconds_bucket{le=\"%g\"} %d\n", boundary, m.durationBuckets[index])
 	}
 	fmt.Fprintf(&b, "loom_execute_duration_seconds_bucket{le=\"+Inf\"} %d\n", m.durationCount)
+	fmt.Fprintf(&b, "loom_execute_duration_seconds_sum %f\n", m.duration.Seconds())
 	fmt.Fprintf(&b, "loom_execute_duration_seconds_count %d\n", m.durationCount)
 	b.WriteString("# HELP loom_durable_store_duration_seconds_total Cumulative durable-store latency.\n")
 	b.WriteString("# TYPE loom_durable_store_duration_seconds_total counter\n")

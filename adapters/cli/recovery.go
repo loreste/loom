@@ -109,6 +109,7 @@ func (a *Adapter) runRecoveryWorker(ctx context.Context, args []string) int {
 		BackoffMax:  recoveryDuration(flags, "backoff-max", "LOOM_RECOVERY_BACKOFF_MAX", 5*time.Minute),
 		MaxAttempts: recoveryInt(flags, "max-attempts", "LOOM_RECOVERY_MAX_ATTEMPTS", 8),
 		Logger:      log.New(a.errW(), "loom recovery: ", log.LstdFlags),
+		Observer:    a.Platform.Metrics,
 	})
 	if err != nil {
 		fmt.Fprintln(a.errW(), "recovery-worker:", err)

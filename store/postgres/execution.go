@@ -533,6 +533,29 @@ func (s *ExecutionStore) DeadLetterRecovery(ctx context.Context, id, leaseID, ca
 	return record, nil
 }
 
+// CountRecovery reports queue depth and the oldest queued update time. Both
+// aggregates are served by idx_loom_executions_recovery; no record bodies are
+// read, so the result carries no caller data.
+func (s *ExecutionStore) CountRecovery(ctx context.Context) (int64, time.Time, error) {
+	if s == nil || s.db == nil {
+		return 0, time.Time{}, fmt.Errorf("%w: nil execution store", core.ErrInvalidArgument)
+	}
+	var depth int64
+	var oldest sql.NullTime
+	err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*), MIN(updated_at)
+		FROM loom_executions
+		WHERE recovery_queued = TRUE
+	`).Scan(&depth, &oldest)
+	if err != nil {
+		return 0, time.Time{}, err
+	}
+	if !oldest.Valid {
+		return depth, time.Time{}, nil
+	}
+	return depth, oldest.Time.UTC(), nil
+}
+
 // ListRecovery returns bounded, caller-safe records awaiting recovery or
 // operator review. It never returns raw request bodies; execution.Record is
 // intentionally limited to durable status fields.
@@ -789,4 +812,5 @@ var _ execution.RecoveryQueue = (*ExecutionStore)(nil)
 var _ execution.RecoveryHeartbeat = (*ExecutionStore)(nil)
 var _ execution.RecoveryScheduler = (*ExecutionStore)(nil)
 var _ execution.RecoveryAdmin = (*ExecutionStore)(nil)
+var _ execution.RecoveryCounter = (*ExecutionStore)(nil)
 var _ idempotency.RecoveryQueue = (*ExecutionStore)(nil)

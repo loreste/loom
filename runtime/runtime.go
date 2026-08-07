@@ -187,6 +187,21 @@ func (rt *Runtime) ValidateOperation(op *core.Operation) error {
 	return nil
 }
 
+// observeDurableStore reports one execution-status write. Like the other
+// observer calls, it recovers from a panicking observer rather than letting
+// telemetry fail a governed execution.
+func (rt *Runtime) observeDurableStore(duration time.Duration, failed bool) {
+	if rt == nil {
+		return
+	}
+	observer, ok := rt.deps.Observer.(DurableStoreObserver)
+	if !ok {
+		return
+	}
+	defer func() { _ = recover() }()
+	observer.ObserveDurableStore(duration, failed)
+}
+
 // ExecutionStatus returns the caller-safe status record for an execution ID.
 // Authorization for remote callers belongs to the adapter; in-process callers
 // should only expose this method to trusted operational code.
@@ -340,7 +355,10 @@ func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Res
 			executionRecord.Outcome = resp.Outcome
 			executionRecord.State = execution.StateFor(resp)
 			executionRecord.UpdatedAt = rt.deps.Clock()
-			if err := rt.deps.ExecutionStatus.Complete(context.Background(), executionRecord); err != nil {
+			storeStart := rt.deps.Clock()
+			err := rt.deps.ExecutionStatus.Complete(context.Background(), executionRecord)
+			rt.observeDurableStore(rt.deps.Clock().Sub(storeStart), err != nil)
+			if err != nil {
 				log.Printf("loom: execution status update failed for %s: %v", executionID, err)
 			}
 		}
@@ -631,8 +649,11 @@ func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Res
 		Response:       core.Response{ExecutionID: executionID, OperationVersion: op.Version},
 		IdempotencyKey: idemKey, Fingerprint: idemFP, StartedAt: start,
 	}
-	if err := rt.deps.ExecutionStatus.Put(ctx, executionRecord); err != nil {
-		return rt.deny(ctx, req, id, op, riskLevel, "execution_status", core.ReasonInternal, err.Error(), start, "")
+	putStart := rt.deps.Clock()
+	putErr := rt.deps.ExecutionStatus.Put(ctx, executionRecord)
+	rt.observeDurableStore(rt.deps.Clock().Sub(putStart), putErr != nil)
+	if putErr != nil {
+		return rt.deny(ctx, req, id, op, riskLevel, "execution_status", core.ReasonInternal, putErr.Error(), start, "")
 	}
 	executionRecordStarted = true
 	result, err := handler(ec)

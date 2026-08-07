@@ -17,7 +17,10 @@ func TestMetricsPrometheusAndSnapshot(t *testing.T) {
 	}
 	m.ObserveDurableStore(10*time.Millisecond, false)
 	m.ObserveDurableStore(5*time.Millisecond, true)
-	m.ObserveRecovery(3, 2*time.Minute, 2, 4, 1)
+	m.ObserveRecoveryQueue(3, 2*time.Minute)
+	m.ObserveRecoveryProgress(2, 4, 1)
+	// A worker reporting progress must not reset the gauges a queue sample set.
+	m.ObserveRecoveryProgress(1, 0, 0)
 	m.Observe(runtime.Observation{Decision: core.DecisionAllow, Step: "execute", Reason: "allow", IdempotentReplay: true, Duration: 2 * time.Millisecond})
 	m.Observe(runtime.Observation{Decision: core.DecisionDeny, Step: "approval", Reason: core.ReasonApprovalRequired, Duration: 20 * time.Millisecond})
 	m.Observe(runtime.Observation{Decision: core.DecisionDeny, Outcome: core.OutcomeExecutedUnconfirmed, Step: "audit", Reason: core.ReasonExecutedUnconfirmed, Duration: 2 * time.Second})
@@ -42,7 +45,9 @@ func TestMetricsPrometheusAndSnapshot(t *testing.T) {
 		"loom_execute_executed_unconfirmed_total 1",
 		"loom_execute_idempotent_replays_total 1",
 		`loom_execute_duration_seconds_bucket{le="0.005"} 1`,
+		"loom_execute_duration_seconds_sum ",
 		"loom_execute_duration_seconds_count 3",
+		"loom_recovery_attempts_total 3",
 		"loom_durable_store_errors_total 1",
 		"loom_recovery_depth 3",
 		`stage="approval"`,

@@ -114,6 +114,14 @@ type RecoveryScheduler interface {
 	DeadLetterRecovery(context.Context, string, string, string, string) (Record, error)
 }
 
+// RecoveryCounter is an optional extension for queue-depth telemetry. It
+// returns the number of records awaiting recovery and the update time of the
+// oldest one; a zero time means the queue is empty. Implementations must
+// answer from an index rather than scanning records.
+type RecoveryCounter interface {
+	CountRecovery(context.Context) (depth int64, oldest time.Time, err error)
+}
+
 // RecoveryAdmin is the durable, governed control-plane surface for recovery
 // review. Implementations must enforce lifecycle/state guards atomically;
 // callers must invoke these methods through registered administrative

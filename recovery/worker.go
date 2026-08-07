@@ -86,6 +86,17 @@ type Config struct {
 	DisableJitter  bool
 	Now            func() time.Time
 	Logger         *log.Logger
+
+	// Observer receives bounded queue telemetry. Leave nil to disable it.
+	Observer Observer
+}
+
+// Observer receives aggregate recovery telemetry. runtime.Metrics satisfies
+// it. Queue gauges are reported separately from progress counters so a worker
+// never resets a gauge it did not sample.
+type Observer interface {
+	ObserveRecoveryQueue(depth int64, oldestAge time.Duration)
+	ObserveRecoveryProgress(attempts, renewals, deadLetters int64)
 }
 
 type Worker struct {
@@ -103,6 +114,7 @@ type Worker struct {
 	jitter      float64
 	now         func() time.Time
 	logger      *log.Logger
+	observer    Observer
 }
 
 type ProcessResult struct {
@@ -162,6 +174,7 @@ func NewWorker(config Config) (*Worker, error) {
 		jitter:      config.JitterFraction,
 		now:         config.Now,
 		logger:      logger,
+		observer:    config.Observer,
 	}, nil
 }
 
@@ -174,15 +187,49 @@ func (w *Worker) Run(ctx context.Context) error {
 	ticker := time.NewTicker(w.poll)
 	defer ticker.Stop()
 	for {
-		if _, err := w.ProcessOne(ctx); err != nil && !errors.Is(err, context.Canceled) {
+		result, err := w.ProcessOne(ctx)
+		if err != nil && !errors.Is(err, context.Canceled) {
 			w.logger.Printf("loom recovery worker: %v", err)
 		}
+		w.report(ctx, result)
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
 		}
 	}
+}
+
+// report publishes bounded telemetry for one poll iteration. Failures to
+// sample the queue are ignored: telemetry must never stop recovery work.
+//
+// ponytail: samples depth once per poll interval; add a longer sample period
+// if the indexed COUNT becomes measurable against a large queue.
+func (w *Worker) report(ctx context.Context, result ProcessResult) {
+	if w.observer == nil {
+		return
+	}
+	var attempts, deadLetters int64
+	if result.Claimed {
+		attempts = 1
+	}
+	if result.DeadLettered {
+		deadLetters = 1
+	}
+	w.observer.ObserveRecoveryProgress(attempts, int64(result.Renewals), deadLetters)
+	counter, ok := w.queue.(execution.RecoveryCounter)
+	if !ok {
+		return
+	}
+	depth, oldest, err := counter.CountRecovery(ctx)
+	if err != nil {
+		return
+	}
+	var age time.Duration
+	if !oldest.IsZero() {
+		age = w.now().Sub(oldest)
+	}
+	w.observer.ObserveRecoveryQueue(depth, age)
 }
 
 // ProcessOne claims and processes at most one recovery record.

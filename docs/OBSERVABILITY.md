@@ -142,6 +142,10 @@ For an uncertain side effect:
 
 The HTTP adapter exposes Prometheus text at `GET /metrics`. The built-in collector exports fixed execution-latency buckets, an in-flight execution gauge, durable-store aggregate latency/error counters, and recovery queue depth/age/attempt/renewal/dead-letter signals. Protect the endpoint with the same network and identity controls used for other operational endpoints. Applications should add deployment-specific labels and backend metrics without exposing credentials, request bodies, SQL, or customer identifiers.
 
+`loom_execute_duration_seconds` is a complete histogram family (`_bucket`, `_sum`, `_count`), so both `histogram_quantile` and `rate(_sum)/rate(_count)` work. `loom_execute_duration_seconds_total` carries the same cumulative value as `_sum` and is retained only for existing scrapers.
+
+The recovery signals are populated by the recovery worker, which reports queue depth and oldest-record age from an indexed count. `loom recovery-worker` wires this automatically. An application that embeds `recovery.Worker` directly must set `recovery.Config.Observer` (`runtime.Metrics` satisfies it), or the recovery series will stay at zero and any alert built on them will never fire.
+
 
 ## Recommended alerts and dashboards
 

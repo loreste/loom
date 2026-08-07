@@ -248,3 +248,93 @@ func TestWorkerRenewsLongVerificationLease(t *testing.T) {
 		t.Fatalf("ProcessOne() = %#v, err=%v renewals=%d", result, err, queue.renewals)
 	}
 }
+
+// countingQueue reports queue depth so the worker can publish gauges.
+type countingQueue struct {
+	fakeQueue
+	oldest time.Time
+}
+
+func (q *countingQueue) CountRecovery(context.Context) (int64, time.Time, error) {
+	if !q.queued {
+		return 0, time.Time{}, nil
+	}
+	return 4, q.oldest, nil
+}
+
+type recordingObserver struct {
+	mu          sync.Mutex
+	depth       int64
+	oldestAge   time.Duration
+	attempts    int64
+	renewals    int64
+	deadLetters int64
+	sampled     chan struct{}
+	sampledOnce sync.Once
+}
+
+func (o *recordingObserver) ObserveRecoveryQueue(depth int64, oldestAge time.Duration) {
+	o.mu.Lock()
+	o.depth, o.oldestAge = depth, oldestAge
+	o.mu.Unlock()
+	o.sampledOnce.Do(func() { close(o.sampled) })
+}
+
+func (o *recordingObserver) ObserveRecoveryProgress(attempts, renewals, deadLetters int64) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.attempts += attempts
+	o.renewals += renewals
+	o.deadLetters += deadLetters
+}
+
+func TestWorkerReportsQueueDepthAndProgress(t *testing.T) {
+	store := execution.NewMemoryStore()
+	record := execution.Record{
+		ExecutionID: "recovery-metrics", Operation: "payment.capture", OperationVersion: "1",
+		Outcome: core.OutcomeExecutedUnconfirmed, State: execution.StateExecutedUnconfirmed,
+		Response: core.Response{Outcome: core.OutcomeExecutedUnconfirmed, ExecutionID: "recovery-metrics"},
+	}
+	if err := store.Put(context.Background(), record); err != nil {
+		t.Fatal(err)
+	}
+	queue := &countingQueue{
+		fakeQueue: fakeQueue{record: record, queued: true},
+		oldest:    time.Now().Add(-90 * time.Second),
+	}
+	observer := &recordingObserver{sampled: make(chan struct{})}
+	worker, err := recovery.NewWorker(recovery.Config{
+		Queue: queue, Store: store, Owner: "worker-a", Lease: time.Minute, Poll: time.Millisecond,
+		Observer: observer,
+		Verifier: recovery.VerifierFunc(func(context.Context, execution.Record) (recovery.Verification, error) {
+			return recovery.Verification{Confirmed: true, Outcome: core.OutcomeAllowed}, nil
+		}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { defer close(done); _ = worker.Run(ctx) }()
+	select {
+	case <-observer.sampled:
+	case <-time.After(5 * time.Second):
+		cancel()
+		<-done
+		t.Fatal("worker never reported a queue sample")
+	}
+	cancel()
+	<-done
+
+	observer.mu.Lock()
+	defer observer.mu.Unlock()
+	if observer.attempts < 1 {
+		t.Fatalf("attempts = %d, want at least 1", observer.attempts)
+	}
+	if observer.depth != 4 && observer.depth != 0 {
+		t.Fatalf("depth = %d, want the queue-reported 4 or 0 once drained", observer.depth)
+	}
+	if observer.depth == 4 && observer.oldestAge < 60*time.Second {
+		t.Fatalf("oldestAge = %s, want the age of the oldest queued record", observer.oldestAge)
+	}
+}
