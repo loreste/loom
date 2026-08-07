@@ -89,7 +89,7 @@ jobs:
           format: cyclonedx-json
           output-file: loom-image-source-sbom.cdx.json
           upload-artifact: false
-      - uses: sigstore/cosign-installer@d7d6bc7722e3daa8354c50bcb52f4837da5e9b6a
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
       - name: Sign image digest and attach SBOM
         env:
           COSIGN_YES: "true"
