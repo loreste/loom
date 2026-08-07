@@ -385,6 +385,10 @@ func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Res
 		}
 	}()
 	start = rt.deps.Clock()
+	if active, ok := rt.deps.Observer.(ActiveObserver); ok {
+		active.Begin()
+		defer active.End()
+	}
 
 	if ctx == nil {
 		ctx = context.Background()

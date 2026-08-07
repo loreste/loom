@@ -343,14 +343,16 @@ func (v *Verifier) Health() Health {
 	if v == nil || v.health == nil {
 		return Health{}
 	}
+	discoverySuccesses := v.health.discoverySuccesses.Load()
+	jwksRefreshSuccesses := v.health.jwksSuccesses.Load()
 	return Health{
-		Ready:                   true,
+		Ready:                   discoverySuccesses > 0 && jwksRefreshSuccesses > 0,
 		Issuer:                  v.cfg.Issuer,
 		LastDiscoveryAt:         unixTime(v.health.lastDiscovery.Load()),
 		LastJWKSRefreshAt:       unixTime(v.health.lastJWKS.Load()),
-		DiscoverySuccesses:      v.health.discoverySuccesses.Load(),
+		DiscoverySuccesses:      discoverySuccesses,
 		DiscoveryFailures:       v.health.discoveryFailures.Load(),
-		JWKSRefreshSuccesses:    v.health.jwksSuccesses.Load(),
+		JWKSRefreshSuccesses:    jwksRefreshSuccesses,
 		JWKSRefreshFailures:     v.health.jwksFailures.Load(),
 		Authentications:         v.health.authentications.Load(),
 		RejectedAuthentications: v.health.rejected.Load(),

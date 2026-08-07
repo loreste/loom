@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -174,6 +175,96 @@ func TestVerifierIntrospectionFailsClosed(t *testing.T) {
 	}
 }
 
+func TestVerifierRejectsTimeClaimsAndMalformedTokens(t *testing.T) {
+	clock := time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
+	server, keys := newOIDCTestServer(t)
+	defer server.Close()
+	verifier := newTestVerifier(t, server, clock, Config{})
+	cases := []struct {
+		name string
+		edit func(map[string]any)
+	}{
+		{name: "expired", edit: func(claims map[string]any) { claims["exp"] = clock.Add(-time.Second).Unix() }},
+		{name: "not yet valid", edit: func(claims map[string]any) { claims["nbf"] = clock.Add(time.Minute).Unix() }},
+		{name: "issued in future", edit: func(claims map[string]any) { claims["iat"] = clock.Add(time.Minute).Unix() }},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			claims := testClaims(server.URL, clock)
+			test.edit(claims)
+			token := signToken(t, keys["key-1"], "key-1", claims)
+			if _, err := verifier.Authenticate(nilContext(), core.Credentials{Scheme: "bearer", Token: token}); err == nil {
+				t.Fatal("invalid time claim unexpectedly accepted")
+			}
+		})
+	}
+	if _, err := verifier.Authenticate(nilContext(), core.Credentials{Scheme: "bearer", Token: "not-a-jwt"}); err == nil {
+		t.Fatal("malformed token unexpectedly accepted")
+	}
+	if _, err := verifier.Authenticate(nilContext(), core.Credentials{Scheme: "bearer", Token: strings.Repeat("x", defaultMaxTokenBytes+1)}); err == nil {
+		t.Fatal("oversized token unexpectedly accepted")
+	}
+}
+
+func TestVerifierRejectsInvalidTLSAndDiscoveryTimeout(t *testing.T) {
+	tlsServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"issuer":"https://issuer.invalid","jwks_uri":"https://issuer.invalid/jwks"}`))
+	}))
+	if _, err := NewVerifier(nilContext(), Config{Issuer: tlsServer.URL, Audience: "loom-client", AllowedAlgorithms: []string{"RS256"}}); err == nil {
+		t.Fatal("invalid TLS certificate unexpectedly trusted")
+	}
+	tlsServer.Close()
+
+	slow := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(100 * time.Millisecond)
+		_, _ = w.Write([]byte(`{"issuer":"https://issuer.invalid","jwks_uri":"https://issuer.invalid/jwks"}`))
+	}))
+	client := slow.Client()
+	client.Timeout = 10 * time.Millisecond
+	if _, err := NewVerifier(nilContext(), Config{Issuer: slow.URL, Audience: "loom-client", AllowedAlgorithms: []string{"RS256"}, HTTPClient: client}); err == nil {
+		t.Fatal("discovery timeout unexpectedly succeeded")
+	}
+	slow.Close()
+}
+
+func TestVerifierConcurrentUnknownKeyRefreshIsBounded(t *testing.T) {
+	clock := time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
+	server, keys := newOIDCTestServer(t)
+	defer server.Close()
+	verifier := newTestVerifier(t, server, clock, Config{})
+	first := signToken(t, keys["key-1"], "key-1", testClaims(server.URL, clock))
+	if _, err := verifier.Authenticate(nilContext(), core.Credentials{Scheme: "bearer", Token: first}); err != nil {
+		t.Fatal(err)
+	}
+	handler := server.Config.Handler.(*oidcHandler)
+	handler.setKeys(keys)
+	handler.jwksRequests.Store(0)
+	claims := testClaims(server.URL, clock)
+	claims["sub"] = "concurrent-rotation"
+	rotated := signToken(t, keys["key-2"], "key-2", claims)
+	const workers = 12
+	errs := make(chan error, workers)
+	var group sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			_, err := verifier.Authenticate(nilContext(), core.Credentials{Scheme: "bearer", Token: rotated})
+			errs <- err
+		}()
+	}
+	group.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if requests := handler.jwksRequests.Load(); requests > 3 {
+		t.Fatalf("unknown-key refresh storm: %d JWKS requests", requests)
+	}
+}
+
 func newTestVerifier(t *testing.T, server *httptest.Server, clock time.Time, extra Config) *Verifier {
 	t.Helper()
 	config := Config{
@@ -213,9 +304,10 @@ func testClaims(issuer string, now time.Time) map[string]any {
 }
 
 type oidcHandler struct {
-	mu        sync.RWMutex
-	keys      map[string]*rsa.PrivateKey
-	oversized bool
+	mu           sync.RWMutex
+	keys         map[string]*rsa.PrivateKey
+	oversized    bool
+	jwksRequests atomic.Int64
 }
 
 func (h *oidcHandler) ServeHTTP(w http.ResponseWriter, request *http.Request) {
@@ -229,6 +321,7 @@ func (h *oidcHandler) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 			"id_token_signing_alg_values_supported": []string{"RS256"},
 		})
 	case "/jwks":
+		h.jwksRequests.Add(1)
 		if h.oversized {
 			_, _ = w.Write([]byte(strings.Repeat("x", defaultMaxJWKSSize+1)))
 			return

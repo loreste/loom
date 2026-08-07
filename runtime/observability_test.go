@@ -3,6 +3,7 @@ package runtime_test
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/loreste/loom/core"
 	"github.com/loreste/loom/runtime"
@@ -10,14 +11,28 @@ import (
 
 func TestMetricsPrometheusAndSnapshot(t *testing.T) {
 	m := runtime.NewMetrics()
-	m.Observe(runtime.Observation{Decision: core.DecisionAllow, Step: "execute", Reason: "allow", IdempotentReplay: true})
-	m.Observe(runtime.Observation{Decision: core.DecisionDeny, Step: "approval", Reason: core.ReasonApprovalRequired})
-	m.Observe(runtime.Observation{Decision: core.DecisionDeny, Outcome: core.OutcomeExecutedUnconfirmed, Step: "audit", Reason: core.ReasonExecutedUnconfirmed})
+	m.Begin()
+	if got := m.Snapshot()["active_executions"]; got != int64(1) {
+		t.Fatalf("active_executions = %v", got)
+	}
+	m.ObserveDurableStore(10*time.Millisecond, false)
+	m.ObserveDurableStore(5*time.Millisecond, true)
+	m.ObserveRecovery(3, 2*time.Minute, 2, 4, 1)
+	m.Observe(runtime.Observation{Decision: core.DecisionAllow, Step: "execute", Reason: "allow", IdempotentReplay: true, Duration: 2 * time.Millisecond})
+	m.Observe(runtime.Observation{Decision: core.DecisionDeny, Step: "approval", Reason: core.ReasonApprovalRequired, Duration: 20 * time.Millisecond})
+	m.Observe(runtime.Observation{Decision: core.DecisionDeny, Outcome: core.OutcomeExecutedUnconfirmed, Step: "audit", Reason: core.ReasonExecutedUnconfirmed, Duration: 2 * time.Second})
 	if got := m.Snapshot()["total"]; got != int64(3) {
 		t.Fatalf("total = %v", got)
 	}
 	if got := m.Snapshot()["executed_unconfirmed"]; got != int64(1) {
 		t.Fatalf("executed_unconfirmed = %v", got)
+	}
+	snapshot := m.Snapshot()
+	if got := snapshot["durable_store_errors"]; got != int64(1) {
+		t.Fatalf("durable_store_errors = %v", got)
+	}
+	if got := snapshot["recovery_depth"]; got != int64(3) {
+		t.Fatalf("recovery_depth = %v", got)
 	}
 	prom := m.Prometheus()
 	for _, want := range []string{
@@ -26,11 +41,19 @@ func TestMetricsPrometheusAndSnapshot(t *testing.T) {
 		"loom_execute_denied_total 2",
 		"loom_execute_executed_unconfirmed_total 1",
 		"loom_execute_idempotent_replays_total 1",
+		`loom_execute_duration_seconds_bucket{le="0.005"} 1`,
+		"loom_execute_duration_seconds_count 3",
+		"loom_durable_store_errors_total 1",
+		"loom_recovery_depth 3",
 		`stage="approval"`,
 		`reason="approval_required"`,
 	} {
 		if !strings.Contains(prom, want) {
 			t.Fatalf("metrics missing %q:\n%s", want, prom)
 		}
+	}
+	m.End()
+	if got := m.Snapshot()["active_executions"]; got != int64(0) {
+		t.Fatalf("active_executions after End = %v", got)
 	}
 }

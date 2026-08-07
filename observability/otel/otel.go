@@ -31,6 +31,7 @@ type Config struct {
 // Bridge implements runtime.Observer.
 type Bridge struct {
 	executions metric.Int64Counter
+	active     metric.Int64UpDownCounter
 	duration   metric.Float64Histogram
 	denials    metric.Int64Counter
 	uncertain  metric.Int64Counter
@@ -50,6 +51,13 @@ func New(config Config) (*Bridge, error) {
 	executions, err := meter.Int64Counter(
 		"loom.executions",
 		metric.WithDescription("Governed Loom execution attempts."),
+	)
+	if err != nil {
+		return nil, err
+	}
+	active, err := meter.Int64UpDownCounter(
+		"loom.active_executions",
+		metric.WithDescription("In-flight governed Loom executions."),
 	)
 	if err != nil {
 		return nil, err
@@ -78,11 +86,24 @@ func New(config Config) (*Bridge, error) {
 	}
 	return &Bridge{
 		executions: executions,
+		active:     active,
 		duration:   duration,
 		denials:    denials,
 		uncertain:  uncertain,
 		tracer:     tracer,
 	}, nil
+}
+
+func (b *Bridge) Begin() {
+	if b != nil {
+		b.active.Add(context.Background(), 1)
+	}
+}
+
+func (b *Bridge) End() {
+	if b != nil {
+		b.active.Add(context.Background(), -1)
+	}
 }
 
 // Observe records one final execution observation. It does not create a new
