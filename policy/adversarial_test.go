@@ -70,11 +70,11 @@ func TestContextualGlobalDenyStillOverrides(t *testing.T) {
 // are matched case-insensitively.
 func TestBypassHeadersDenied(t *testing.T) {
 	cases := []map[string]string{
-		{"x-admin-override": "yes"},   // previously allowed (not "true"/"1")
-		{"x-admin-override": "0"},     // any non-empty value denies
-		{"X-Admin-Override": "true"},  // mixed-case key
-		{"X-LOOM-BYPASS": "1"},        // upper-case key
-		{"x-LoOm-ByPaSs": "yes"},      // mixed-case key
+		{"x-admin-override": "yes"},  // previously allowed (not "true"/"1")
+		{"x-admin-override": "0"},    // any non-empty value denies
+		{"X-Admin-Override": "true"}, // mixed-case key
+		{"X-LOOM-BYPASS": "1"},       // upper-case key
+		{"x-LoOm-ByPaSs": "yes"},     // mixed-case key
 	}
 	for _, md := range cases {
 		eng := policy.NewMemoryEngine()

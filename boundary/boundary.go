@@ -21,7 +21,7 @@ type Checker interface {
 // Empty requested boundary is deny unless policy explicitly allows a default
 // (this checker never invents a default boundary).
 type MemoryChecker struct {
-	mu   sync.RWMutex
+	mu sync.RWMutex
 	// principal -> boundary -> struct{}
 	member map[core.PrincipalID]map[core.BoundaryID]struct{}
 }

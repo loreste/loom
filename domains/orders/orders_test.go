@@ -33,11 +33,11 @@ func TestOrdersDomainNoRawSQLCapability(t *testing.T) {
 	// intentionally do NOT enable db.query for this principal
 
 	resp := a.Call(context.Background(), core.Request{
-		Operation:   "order.create",
-		Credentials: core.Credentials{Token: "tok"},
-		Boundary:    "dev",
-		Resource:    &core.ResourceRef{Type: "order", ID: "*"},
-		Input:       map[string]any{"customer": "c1", "sku": "S1", "qty": 2},
+		Operation:      "order.create",
+		Credentials:    core.Credentials{Token: "tok"},
+		Boundary:       "dev",
+		Resource:       &core.ResourceRef{Type: "order", ID: "*"},
+		Input:          map[string]any{"customer": "c1", "sku": "S1", "qty": 2},
 		IdempotencyKey: "o1",
 	})
 	if !resp.Allowed {

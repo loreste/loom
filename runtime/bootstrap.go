@@ -17,20 +17,20 @@ import (
 // TestStack is a fully wired in-memory stack for tests and examples.
 // Still deny-by-default until rules/principals are granted.
 type TestStack struct {
-	Runtime    *Runtime
-	Registry   *core.Registry
-	Verifier   *identity.MemoryVerifier
-	Delegation *identity.MemoryDelegation
-	Boundary   *boundary.MemoryChecker
-	Policy     *policy.MemoryEngine
-	Resources  *resource.MemoryChecker
-	Fields     *resource.FieldFilter
-	Guardrails *guardrails.Chain
+	Runtime     *Runtime
+	Registry    *core.Registry
+	Verifier    *identity.MemoryVerifier
+	Delegation  *identity.MemoryDelegation
+	Boundary    *boundary.MemoryChecker
+	Policy      *policy.MemoryEngine
+	Resources   *resource.MemoryChecker
+	Fields      *resource.FieldFilter
+	Guardrails  *guardrails.Chain
 	Approval    *approval.MemoryEngine
 	Quotas      *quotas.MemoryLimiter
 	Idempotency *idempotency.MemoryStore
-	AuditSink  *audit.MemorySink
-	RiskBlock  *risk.Blocker
+	AuditSink   *audit.MemorySink
+	RiskBlock   *risk.Blocker
 }
 
 // NewTestStack constructs a deny-all stack ready for explicit grants.

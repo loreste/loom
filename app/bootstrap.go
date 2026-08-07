@@ -25,10 +25,10 @@ type SeedUser struct {
 
 // SeedOp is one GrantOp during bootstrap.
 type SeedOp struct {
-	Op            string
-	ResType       string
-	ResID         string
-	Fields        []string
+	Op      string
+	ResType string
+	ResID   string
+	Fields  []string
 }
 
 // BootstrapConfig is a one-shot embed setup: open DB, migrate, register ops, seed users.

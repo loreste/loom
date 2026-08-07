@@ -27,11 +27,11 @@ type ipBucket struct {
 }
 
 type rateLimiter struct {
-	mu       sync.Mutex
-	rate     float64 // tokens per second
-	burst    float64
-	now      func() time.Time
-	buckets  map[string]*ipBucket
+	mu        sync.Mutex
+	rate      float64 // tokens per second
+	burst     float64
+	now       func() time.Time
+	buckets   map[string]*ipBucket
 	lastSweep time.Time
 }
 

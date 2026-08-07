@@ -43,7 +43,7 @@ type StaticPrincipal struct {
 //   - Unknown token never authenticates.
 //   - Token comparison uses hashed equality; raw tokens are not stored after Register.
 type MemoryVerifier struct {
-	mu    sync.RWMutex
+	mu     sync.RWMutex
 	byHash map[string]StaticPrincipal
 }
 
@@ -125,7 +125,7 @@ func (v *MemoryVerifier) Authenticate(ctx context.Context, creds core.Credential
 //   - empty OnBehalfOf → invalid
 //   - scope empty means no capabilities (not "all")
 type MemoryDelegation struct {
-	mu    sync.RWMutex
+	mu sync.RWMutex
 	// tokenHash -> record
 	tokens map[string]delegationRecord
 }
