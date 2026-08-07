@@ -13,6 +13,22 @@ GOCACHE=/tmp/loom-gocache go test -run '^$' \
   -bench BenchmarkExecuteGranted -benchtime=2s ./runtime
 ```
 
+The checked-in matrix runner records host and tool metadata and includes the
+HTTP adapter benchmark:
+
+```bash
+LOOM_PERF_OUTPUT=/tmp/loom-performance \
+LOOM_PERF_COUNT=5 \
+LOOM_PERF_TIME=2s \
+sh scripts/performance.sh
+```
+
+The runner currently covers the in-process and HTTP in-memory paths. It does
+not claim PostgreSQL, Redis, MCP, GraphQL, gRPC, Weft, replica-scale, or soak
+capacity. Those require deployment-specific harnesses and must publish their
+database/Redis versions, replica count, latency percentiles, allocation data,
+error/denial rates, and failure-injection method alongside the result.
+
 The benchmark uses a fully wired in-memory test stack and a low-risk read
 operation. It excludes network, database, Redis, external identity, and
 provider latency.
@@ -27,6 +43,10 @@ Command: `go test -run '^$' -bench BenchmarkExecuteGranted -benchtime=2s ./runti
 ```text
 BenchmarkExecuteGranted-10    382894    7789 ns/op
 ```
+
+The HTTP benchmark is a regression signal for adapter overhead, not a network
+throughput claim. Run `scripts/performance.sh` on the target deployment and
+retain its `metadata.txt` with the result before setting an SLO.
 
 The benchmark is checked into `runtime/benchmark_test.go` so future changes
 can compare the same path. Treat the result as a regression signal, not a

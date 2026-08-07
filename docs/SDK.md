@@ -9,6 +9,21 @@ The Go SDK supports both local in-process calls and remote HTTP calls. The
 Weft SDK is an in-process Go adapter. Python, TypeScript/Node, and Rust call
 the HTTP adapter.
 
+Published package versions are kept equal to the Loom release tag and checked
+before publication.
+
+## Install released SDKs
+
+```sh
+python -m pip install loom-sdk
+npm install @loreste/loom-sdk
+cargo add loom-sdk
+go get github.com/loreste/loom@vX.Y.Z
+```
+
+Replace `vX.Y.Z` with the reviewed release. Node applications use the
+TypeScript package directly through its package exports.
+
 ## Start a development server
 
 From a Loom checkout:
@@ -86,7 +101,8 @@ response, err := client.Invoke(ctx, loomweft.StepCall{
 
 ## Python
 
-The Python package is currently installed from a Loom checkout:
+For local checkout development, install the Python package directly from the
+repository:
 
 ```bash
 python3 -m venv .venv
@@ -120,7 +136,8 @@ discovery and protocol requests. Discovery does not grant access.
 
 ## TypeScript and Node.js
 
-The TypeScript package is currently installed and built from the checkout. It
+For local checkout development, build the TypeScript package from the
+repository. It
 requires Node.js 18 or newer. Browser-compatible callers use `Client`; Node
 applications should import the explicit `NodeClient` entry point.
 

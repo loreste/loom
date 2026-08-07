@@ -125,6 +125,22 @@ before investigations, retention exports, and compliance reports. Keep the
 checkpoint signing key outside Loom and rotate it under the organization's key
 management policy.
 
+## Operator CLI
+
+The CLI provides operator-safe diagnostics without a private state bypass:
+
+```sh
+loom execution get <execution-id> --url=https://loom.example --token="$LOOM_TOKEN"
+loom audit verify --input=/var/log/loom/audit.jsonl --initial-hash="$TRUSTED_HEAD"
+loom recovery-worker --verifier-url=https://provider.example/recovery/verify
+```
+
+`execution get` uses the authenticated execution-status endpoint and follows
+the same capability checks as other adapters. `audit verify` is offline and
+checks a JSONL hash chain against a trusted prior head; it does not trust a
+head read from the same untrusted file. The recovery worker is documented in
+[`RECOVERY.md`](RECOVERY.md) and never invokes a business handler.
+
 ## Incident response
 
 When Loom denies unexpectedly, capture the trace ID, execution ID, operation

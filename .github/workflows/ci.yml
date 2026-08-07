@@ -3,6 +3,7 @@ name: ci
 on:
   push:
     branches: [main, master]
+    tags: ["v*"]
   pull_request:
     branches: [main, master]
 
@@ -185,3 +186,16 @@ jobs:
           LOOM_CONTRACT_OPERATION: sdk.contract
           LOOM_CONTRACT_TOKEN: ci-contract-token
         run: cargo test --manifest-path sdk/rust/Cargo.toml
+  helm:
+    name: helm-chart
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: Azure/setup-helm@bf6a7d304bc2fdb57e0331155b7ebf2c504acf0a
+        with:
+          version: v3.17.3
+      - name: Lint chart with explicit external-secret and verifier references
+        run: |
+          helm lint deploy/helm/loom \
+            --set secrets.existingSecret=loom-ci \
+            --set recoveryWorker.verifierURL=https://provider.invalid/recovery/verify

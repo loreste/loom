@@ -68,6 +68,10 @@ func (a *Adapter) Run(ctx context.Context, args []string) int {
   loom serve [--addr=:8080] [--grpc-addr=:9090] [--data-dir=./data] [--database-url=postgres://...] [--redis-url=redis://...] [--tls-cert=] [--tls-key=] [--client-ca=]
   loom mint-jwt --sub=user:alice --boundary=dev --caps=document.read   # requires LOOM_DEV_TOOLS=1
   loom approve --token=appr-1 --principal=user:bob --op=payment.capture --boundary=dev  # requires LOOM_DEV_TOOLS=1
+  loom recovery-worker --verifier-url=https://provider.example/recovery
+  loom execution get <execution-id> --url=https://loom.example --token=$LOOM_TOKEN
+  loom audit verify --input=/var/log/loom/audit.jsonl
+  loom migrate
   loom version`)
 		return 2
 	}
@@ -88,6 +92,29 @@ func (a *Adapter) Run(ctx context.Context, args []string) int {
 			return 2
 		}
 		return a.runApprove(args[1:])
+	case "recovery-worker":
+		return a.runRecoveryWorker(ctx, args[1:])
+	case "execution":
+		if len(args) > 1 && args[1] == "get" {
+			return a.runExecutionGet(ctx, args[2:])
+		}
+		fmt.Fprintln(a.errW(), "usage: loom execution get <execution-id> --url=... --token=...")
+		return 2
+	case "audit":
+		if len(args) > 1 && args[1] == "verify" {
+			return a.runAuditVerify(args[2:])
+		}
+		fmt.Fprintln(a.errW(), "usage: loom audit verify --input=/path/audit.jsonl [--initial-hash=...]")
+		return 2
+	case "migrate":
+		// Platform construction runs the idempotent schema migration before
+		// dispatch. Keeping this command side-effect limited makes it suitable
+		// for a Kubernetes migration Job.
+		if a.Platform == nil || a.Platform.DB == nil {
+			fmt.Fprintln(a.errW(), "migrate requires LOOM_DATABASE_URL")
+			return 2
+		}
+		return 0
 	case "version":
 		v := a.Version
 		if v == "" {

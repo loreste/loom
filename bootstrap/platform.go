@@ -53,7 +53,12 @@ type Platform struct {
 	Quotas      quotas.Limiter
 	QuotaConfig *quotas.Config
 	Idempotency idempotency.Store
-	AuditSink   *audit.MemorySink
+	// ExecutionStatus and RecoveryQueue are the stores used by Runtime and
+	// exposed for the official recovery-worker command. Callers must use
+	// recovery.Worker rather than mutating records directly.
+	ExecutionStatus execution.Store
+	RecoveryQueue   execution.RecoveryQueue
+	AuditSink       *audit.MemorySink
 	// JWTSecret used for minting demo tokens (dev only).
 	JWTSecret []byte
 	// DemoTokens contains process-local development credentials generated at
@@ -315,6 +320,10 @@ func NewPlatform(cfg Config) (*Platform, error) {
 		mode = runtime.ModeProduction
 	}
 	var recovery idempotency.RecoveryQueue
+	var recoveryQueue execution.RecoveryQueue
+	if q, ok := executionStore.(execution.RecoveryQueue); ok {
+		recoveryQueue = q
+	}
 	if q, ok := executionStore.(idempotency.RecoveryQueue); ok {
 		recovery = q
 	} else if q, ok := idem.(idempotency.RecoveryQueue); ok {
@@ -363,34 +372,36 @@ func NewPlatform(cfg Config) (*Platform, error) {
 	}
 
 	p := &Platform{
-		Runtime:     rt,
-		Registry:    reg,
-		Memory:      mem,
-		JWT:         jwt,
-		MTLS:        mtls,
-		Multi:       multi,
-		Delegation:  del,
-		Boundary:    bnd,
-		Policy:      pol,
-		Resources:   res,
-		Fields:      fields,
-		Approval:    apr,
-		Quotas:      limiter,
-		QuotaConfig: qcfg,
-		Idempotency: idem,
-		AuditSink:   memSink,
-		JWTSecret:   secret,
-		DemoTokens:  make(map[core.PrincipalID]string),
-		Docs:        document.NewStore(),
-		DataDir:     cfg.DataDir,
-		DB:          db,
-		Redis:       rdb,
-		Ready:       ready,
-		Metrics:     metrics,
-		jwtIssuer:   cfg.JWTIssuer,
-		jwtAudience: cfg.JWTAudience,
-		jwtKeyID:    cfg.JWTKeyID,
-		auditFile:   auditFile,
+		Runtime:         rt,
+		Registry:        reg,
+		Memory:          mem,
+		JWT:             jwt,
+		MTLS:            mtls,
+		Multi:           multi,
+		Delegation:      del,
+		Boundary:        bnd,
+		Policy:          pol,
+		Resources:       res,
+		Fields:          fields,
+		Approval:        apr,
+		Quotas:          limiter,
+		QuotaConfig:     qcfg,
+		Idempotency:     idem,
+		ExecutionStatus: executionStore,
+		RecoveryQueue:   recoveryQueue,
+		AuditSink:       memSink,
+		JWTSecret:       secret,
+		DemoTokens:      make(map[core.PrincipalID]string),
+		Docs:            document.NewStore(),
+		DataDir:         cfg.DataDir,
+		DB:              db,
+		Redis:           rdb,
+		Ready:           ready,
+		Metrics:         metrics,
+		jwtIssuer:       cfg.JWTIssuer,
+		jwtAudience:     cfg.JWTAudience,
+		jwtKeyID:        cfg.JWTKeyID,
+		auditFile:       auditFile,
 	}
 	// Policy source: explicit file path overrides; else postgres when available;
 	// else DataDir/policy.json when data dir set.

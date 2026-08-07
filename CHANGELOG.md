@@ -24,6 +24,18 @@ All notable changes to Loom are documented here. The format follows
 - Added the maintained `observability/otel` bridge for bounded metrics and
   current-span annotations without sensitive or high-cardinality labels.
 
+- Added a maintained recovery-worker CLI with an HTTPS provider-verification
+  contract, durable store wiring, and operator-safe execution diagnostics.
+- Added authenticated `execution get` and offline `audit verify` CLI commands.
+- Added a signed multi-architecture GHCR publication workflow, SDK publication
+  workflows with exact version alignment, and release documentation.
+- Added a production-oriented Helm chart with separate API/recovery workloads,
+  migration hook, probes, PDB, external-secret references, and network policy.
+- Added HTTP adapter performance coverage and a metadata-recording benchmark
+  runner; durable backend and replica-scale results remain deployment evidence.
+- Updated SQLite and Redis dependencies and aligned all CodeQL action components
+  to the same major version.
+
 ## [0.1.7] — 2026-08-05
 
 ### Added

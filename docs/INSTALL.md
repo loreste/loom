@@ -68,8 +68,10 @@ download the matching `.exe` asset from the [release page](https://github.com/lo
 
 ## Build and run the Docker image
 
-The repository builds the image locally; it does not publish a default image
-to a container registry.
+The release workflow publishes the official multi-architecture image to
+`ghcr.io/<owner>/<repository>` after the exact-tag CI, security, and container
+scan gates pass. Local builds remain useful for development and air-gapped
+verification; see [`RELEASES.md`](RELEASES.md).
 
 ```bash
 docker build \
@@ -98,11 +100,12 @@ Then use `app.New` or `app.Bootstrap`, register operations, grant explicit
 policy and resource access, and call only through `app.Call`. See
 [`EMBED.md`](EMBED.md) and [`HOWTO.md`](HOWTO.md).
 
-## Install the SDKs from this repository
+## Install the SDKs
 
 The Go SDK is part of the Go module. The Python, TypeScript, and Rust SDKs are
-included in this repository but are not published to package registries by the
-current release workflows.
+published with matching release versions after the tag validation gate. For a
+released package, use the registry commands in [`SDK.md`](SDK.md). For local
+development, install directly from the repository:
 
 Python:
 

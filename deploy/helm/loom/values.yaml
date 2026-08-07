@@ -1,0 +1,54 @@
+image:
+  repository: ghcr.io/loreste/loom
+  tag: ""
+  digest: ""
+  pullPolicy: IfNotPresent
+
+api:
+  replicas: 2
+  service:
+    type: ClusterIP
+    port: 8080
+  resources: {}
+
+recoveryWorker:
+  enabled: true
+  replicas: 1
+  verifierURL: ""
+  resources: {}
+  poll: 5s
+  lease: 5m
+  backoffBase: 1s
+  backoffMax: 5m
+  maxAttempts: "8"
+
+secrets:
+  existingSecret: ""
+  databaseURLKey: database-url
+  redisURLKey: redis-url
+  jwtSecretKey: jwt-secret
+  jwtIssuerKey: jwt-issuer
+  jwtAudienceKey: jwt-audience
+  recoveryVerifierTokenKey: recovery-verifier-token
+
+loom:
+  tenantClaim: tenant_id
+  policyPath: ""
+  policySyncInterval: 5s
+  trustedTLSProxy: true
+  httpRateLimitPerMinute: "0"
+
+serviceAccount:
+  create: true
+  name: ""
+
+networkPolicy:
+  enabled: true
+  allowedIngressNamespaceSelector: {}
+
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1
+
+migration:
+  enabled: true

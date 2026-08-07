@@ -119,9 +119,10 @@ To add Loom to another Go module, use an exact release tag:
 go get github.com/loreste/loom@vX.Y.Z
 ```
 
-The Go module is available through the repository. The Python, TypeScript,
-and Rust SDKs are currently installed from this repository; their installation
-status is documented in [SDK.md](docs/SDK.md).
+The Go module and Python, TypeScript/Node, and Rust SDKs are published with
+matching release versions. Install commands and local-development instructions
+are documented in [SDK.md](docs/SDK.md). Release artifacts, the signed GHCR
+image, and package provenance are documented in [RELEASES.md](docs/RELEASES.md).
 
 ## Optional protocol adapters
 
@@ -202,8 +203,9 @@ Additional operational guides:
 The main CI workflow runs Go vet, race-enabled tests, fuzz smoke tests,
 PostgreSQL integration tests, SDK builds/tests, and cross-SDK contract tests.
 Security workflows run Go vulnerability and static checks, CodeQL, secret
-scanning, dependency review, and SBOM generation. Container scanning is
-available as a manually dispatched workflow.
+scanning, dependency review, and SBOM generation. Container scanning runs on
+pull requests, relevant source changes, release tags, and a weekly schedule.
+The Helm chart is linted in CI.
 
 Useful local checks:
 
