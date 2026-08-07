@@ -94,6 +94,7 @@ jobs:
         working-directory: sdk/typescript
         run: |
           npm install --global npm@11.5.1
+          unset NODE_AUTH_TOKEN
           npm config delete //registry.npmjs.org/:_authToken
           npm install --no-package-lock
           npm run build
