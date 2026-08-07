@@ -201,6 +201,20 @@ mod tests {
     use serde_json::json;
     use std::collections::HashMap;
 
+    #[test]
+    fn shared_conformance_fixture_is_versioned_and_deny_by_default() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../conformance/fixtures/execute-semantics.v1.json"
+        ))
+        .expect("fixture JSON");
+        assert_eq!(fixture["schema_version"], 1);
+        let cases = fixture["cases"].as_array().expect("cases array");
+        assert_eq!(cases.len(), 2);
+        assert!(cases
+            .iter()
+            .all(|case| case["expected"]["allowed"] == false));
+    }
+
     #[tokio::test]
     async fn execute_contract_when_configured() {
         let Ok(base_url) = std::env::var("LOOM_CONTRACT_URL") else {

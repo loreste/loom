@@ -18,9 +18,21 @@ mkdir -p "$out"
 	echo "redis_configured=$([ -n "${LOOM_REDIS_URL:-}" ] && echo true || echo false)"
 } > "$out/metadata.txt"
 
-go test -run '^$' -bench 'BenchmarkExecuteGranted$' -benchmem -count="$count" -benchtime="$time" ./runtime/ > "$out/in-process.txt"
-go test -run '^$' -bench 'BenchmarkExecuteHTTP$' -benchmem -count="$count" -benchtime="$time" ./adapters/http/ > "$out/http-adapter.txt"
+run_benchmark() {
+	name=$1
+	package=$2
+	pattern=$3
+	go test -run '^$' -bench "$pattern" -benchmem -count="$count" -benchtime="$time" "$package" > "$out/$name.txt"
+}
+
+run_benchmark in-process ./runtime/ 'BenchmarkExecuteGranted$'
+run_benchmark http-adapter ./adapters/http/ 'BenchmarkExecuteHTTP$'
+run_benchmark mcp-adapter ./adapters/mcp/ 'BenchmarkCall$'
+run_benchmark graphql-adapter ./adapters/graphql/ 'BenchmarkExecuteHTTP$'
+run_benchmark grpc-adapter ./adapters/grpc/ 'BenchmarkExecute$'
+run_benchmark weft-adapter ./adapters/weft/ 'BenchmarkInvoke$'
 
 echo "performance results written to $out"
-echo "Only in-process and HTTP in-memory benchmarks are available in this repository."
-echo "Set backend-specific harnesses in the deployment environment before publishing durable results."
+echo "These repository benchmarks cover in-process adapters with in-memory dependencies."
+echo "Attach deployment-specific PostgreSQL, Redis, identity-provider, replica, and soak results"
+echo "before making production capacity claims."

@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { Client } from "../dist/index.js";
+
+const fixture = JSON.parse(readFileSync(fileURLToPath(new URL("../../../conformance/fixtures/execute-semantics.v1.json", import.meta.url)), "utf8"));
+assert.equal(fixture.schema_version, 1);
+assert.equal(fixture.cases.length, 2);
+assert.ok(fixture.cases.every((testCase) => testCase.expected.allowed === false));
 
 const contractURL = process.env.LOOM_CONTRACT_URL;
 if (contractURL) {

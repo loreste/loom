@@ -1,11 +1,19 @@
 import json
 import os
+from pathlib import Path
 import unittest
 
 from loom import Client, Denial, ResourceRef, _parse_response
 
 
 class SDKShapeTests(unittest.TestCase):
+    def test_shared_conformance_fixture(self):
+        fixture_path = Path(__file__).resolve().parents[3] / "conformance" / "fixtures" / "execute-semantics.v1.json"
+        fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+        self.assertEqual(fixture["schema_version"], 1)
+        self.assertEqual(len(fixture["cases"]), 2)
+        self.assertTrue(all(case["expected"]["allowed"] is False for case in fixture["cases"]))
+
     def test_response_parses_go_wire_shape(self):
         response = _parse_response(
             {

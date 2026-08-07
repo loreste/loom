@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "name": "unknown-operation-denies",
+      "request": {
+        "operation": "fixture.unknown",
+        "operation_version": "1",
+        "boundary": "tenant-a",
+        "input": {}
+      },
+      "expected": {
+        "allowed": false,
+        "decision": "deny",
+        "outcome": "denied",
+        "operation_version": "1"
+      }
+    },
+    {
+      "name": "missing-idempotency-remains-denied",
+      "request": {
+        "operation": "payment.capture",
+        "operation_version": "1",
+        "boundary": "tenant-a",
+        "input": {
+          "amount": "10.00",
+          "currency": "USD"
+        }
+      },
+      "expected": {
+        "allowed": false,
+        "decision": "deny",
+        "outcome": "denied"
+      }
+    }
+  ]
+}
