@@ -3,7 +3,7 @@
 This is a thin HTTP client for the Loom runtime. Authorization remains
 server-side; the SDK cannot grant permissions.
 
-The 0.1.8 source is version-aligned with Loom, but its PyPI publication is
+The 0.2.0 source is version-aligned with Loom, but its PyPI publication is
 pending registry trusted-publisher configuration. Install it from this
 checkout for now:
 

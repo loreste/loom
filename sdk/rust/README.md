@@ -3,7 +3,7 @@
 This crate is a thin HTTP client. Governance remains server-side and the SDK
 cannot grant permissions.
 
-The 0.1.8 source is version-aligned with Loom, but its crates.io publication
+The 0.2.0 source is version-aligned with Loom, but its crates.io publication
 is pending registry trusted-publisher configuration. Use it as a path
 dependency from this checkout for now:
 

@@ -63,7 +63,14 @@ transactions.
 
 ## Compliance visibility
 
-Every governed attempt produces a structured audit decision with an execution ID, trace ID, selected operation version, adapter, boundary, enforcement stage, stable reason code, outcome, and redacted correlation digests. Reconciliation and recovery actions are recorded as lifecycle events. `runtime.Metrics` exposes bounded counters for denials, replays, quota and approval outcomes, idempotency conflicts, and uncertain executions. The maintained `observability/otel` bridge exports bounded metrics and annotates an existing OpenTelemetry span without emitting credentials or high-cardinality customer identifiers.
+Every governed attempt produces a structured audit decision with an execution ID, trace ID, selected operation version, adapter, boundary, enforcement stage, stable reason code, outcome, and redacted correlation digests. Reconciliation and recovery actions are recorded as lifecycle events. `runtime.Metrics` exposes bounded counters for denials, replays, quota and approval outcomes, idempotency conflicts, and uncertain executions, plus an execution-latency histogram, an in-flight gauge, durable-store latency and error aggregates, and recovery queue depth, age, attempts, renewals, and dead letters. The maintained `observability/otel` bridge exports bounded metrics and annotates an existing OpenTelemetry span without emitting credentials or high-cardinality customer identifiers.
+
+Audit streams are hash-chained. `loom audit head`, `verify`, and `export` check a
+segment against a trusted prior hash rather than one read from the same source,
+`export --stream` reads a verified segment from the durable PostgreSQL stream,
+and `checkpoint`, `verify-checkpoint`, and `rotate` sign, confirm, and re-key a
+signed terminal hash. Rotation verifies the prior checkpoint under the retired
+key before signing with the new one.
 
 Loom keeps credentials, approval tokens, idempotency keys, raw SQL, and unrestricted request bodies out of audit events. Configure a durable PostgreSQL or JSONL sink for production and export it to the immutable archive, SIEM, or compliance system required by your organization. See [`docs/OBSERVABILITY.md`](docs/OBSERVABILITY.md).
 
@@ -82,7 +89,7 @@ operations that application should expose.
 
 ## Status
 
-The current repository release is `v0.1.8`; [`VERSION`](VERSION) is the
+The current repository release is `v0.2.0`; [`VERSION`](VERSION) is the
 release source of truth. See the [release page](https://github.com/loreste/loom/releases)
 for published binaries, checksums, signatures, SBOM, provenance, and the signed
 container image. The release includes a production-oriented OIDC/JWKS verifier,
@@ -169,7 +176,11 @@ Before using Loom for production side effects:
   multi-node deployments;
 - use Redis when quotas must be shared across replicas;
 - use restricted database roles, PostgreSQL RLS, tenant-bound transactions,
-  timeouts, and connection limits; and
+  timeouts, and connection limits;
+- register application-owned dependencies through `bootstrap.Config.ReadyChecks`
+  so `/readyz` reflects them — an OIDC deployment should pass
+  `verifier.ReadyCheck()`, since Loom cannot probe a verifier it did not build;
+  and
 - protect readiness, metrics, status, and reconciliation endpoints.
 
 Read:

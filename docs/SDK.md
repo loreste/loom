@@ -18,7 +18,7 @@ Cross-language request/response semantics are versioned in
 ## Install released SDKs
 
 Use these commands only after the release documentation confirms that the
-corresponding registry publication succeeded. For v0.1.8, install from the
+corresponding registry publication succeeded. For v0.2.0, install from the
 checkout using the local-development sections below while registry setup is
 pending.
 

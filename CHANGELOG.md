@@ -6,6 +6,8 @@ All notable changes to Loom are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-08-07
+
 ### Breaking
 
 - `loom audit rotate` now requires `--checkpoint` and
@@ -42,6 +44,14 @@ All notable changes to Loom are documented here. The format follows
 - `/readyz` reported ready when an application-supplied identity verifier had
   never reached its issuer, serving traffic that denied every authenticated
   request.
+- PostgreSQL audit export could never verify a chain written on a platform
+  whose clock has nanosecond resolution. `TIMESTAMPTZ` stores microseconds and
+  rounds anything finer, so the stored hash committed to a timestamp the
+  database could not return. Event timestamps are now rounded to microseconds
+  before hashing.
+- Release checksum generation now preserves downloaded binary artifacts by
+  checking out source before downloading them.
+- The PyPI publication action is pinned to a valid container-backed release.
 
 ### Changed
 
@@ -51,11 +61,6 @@ All notable changes to Loom are documented here. The format follows
   trusted-publisher configuration; npm clears injected token authentication
   before attempting OIDC publication.
 
-### Fixed
-
-- Release checksum generation now preserves downloaded binary artifacts by
-  checking out source before downloading them.
-- The PyPI publication action is pinned to a valid container-backed release.
 
 ## [0.1.8] — 2026-08-07
 
