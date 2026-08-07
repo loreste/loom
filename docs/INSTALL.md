@@ -61,9 +61,11 @@ curl --fail --location \
 ```
 
 Set `LOOM_INSTALL_DIR` to use another destination. The installer downloads the
-matching release asset but does not perform signature or checksum verification
-itself. For higher-assurance deployments, verify the release asset digest or
-use an organization-controlled mirror before installation. Windows users can
+exact release asset and verifies its SHA-256 entry from `SHA256SUMS` before
+installation. Checksum verification protects against transfer corruption and
+mismatched release assets; higher-assurance deployments should also verify the
+Cosign bundle and build provenance from the organization-controlled
+[release page](https://github.com/loreste/loom/releases). Windows users can
 download the matching `.exe` asset from the [release page](https://github.com/loreste/loom/releases).
 
 ## Build and run the Docker image

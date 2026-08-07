@@ -20,6 +20,9 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Verify modules
+        run: go mod verify
+
       - name: Vet
         run: go vet ./...
 
@@ -62,6 +65,31 @@ jobs:
         run: |
           go test ./store/postgres/ -run Postgres -count=1
           go test ./bootstrap/ -run Postgres -count=1
+
+  redis:
+    name: redis-integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Redis integration
+        env:
+          LOOM_REDIS_URL: redis://127.0.0.1:6379/0
+        run: go test ./quotas/ -run RedisLimiterIntegration -count=1
 
   python-sdk:
     name: python-sdk

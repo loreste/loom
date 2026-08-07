@@ -87,8 +87,8 @@ and promotion policy.
 Pushing a tag matching `v*` runs the release workflow. It:
 
 1. verifies the tag points at its exact commit;
-2. waits for successful `ci`, `security`, and `container-scan` workflows for
-   that same commit;
+2. waits for successful `ci`, `security`, `dependency-review`, and
+   `container-scan` workflows for that same commit;
 3. builds Linux, macOS, and Windows binaries for amd64 and arm64;
 4. creates a CycloneDX SBOM and SHA-256 checksum manifest;
 5. creates keyless Cosign signature bundles and build-provenance attestations;

@@ -131,14 +131,34 @@ The CLI provides operator-safe diagnostics without a private state bypass:
 
 ```sh
 loom execution get <execution-id> --url=https://loom.example --token="$LOOM_TOKEN"
+loom policy lint --input=policy.json
+loom policy test --input=policy-with-tests.json
+loom policy explain --input=policy.json --principal=user:alice --boundary=dev --operation=document.read
+loom policy simulate --input=policy.json --principal=user:alice --boundary=dev --operation=document.read
+loom policy diff --from=old-policy.json --to=new-policy.json
+loom audit head --input=/var/log/loom/audit.jsonl --initial-hash="$TRUSTED_HEAD"
 loom audit verify --input=/var/log/loom/audit.jsonl --initial-hash="$TRUSTED_HEAD"
+loom audit export --input=/var/log/loom/audit.jsonl --from=100 --to=200 --initial-hash="$TRUSTED_HEAD"
+LOOM_AUDIT_CHECKPOINT_KEY="$CHECKPOINT_KEY" loom audit checkpoint --input=/var/log/loom/audit.jsonl
+LOOM_AUDIT_CHECKPOINT_KEY="$ROTATED_KEY" loom audit rotate --input=/var/log/loom/audit.jsonl
 loom recovery-worker --verifier-url=https://provider.example/recovery/verify
+loom recovery list --url=https://loom.example --token="$LOOM_TOKEN" --boundary=ops
+loom recovery requeue --execution-id="$EXECUTION_ID" --url=https://loom.example --token="$LOOM_TOKEN" --boundary=ops --idempotency-key="$IDEMPOTENCY_KEY" --approval-token="$APPROVAL_TOKEN"
+loom recovery dead-letter --execution-id="$EXECUTION_ID" --url=https://loom.example --token="$LOOM_TOKEN" --boundary=ops --idempotency-key="$IDEMPOTENCY_KEY" --approval-token="$APPROVAL_TOKEN"
 ```
 
 `execution get` uses the authenticated execution-status endpoint and follows
 the same capability checks as other adapters. `audit verify` is offline and
 checks a JSONL hash chain against a trusted prior head; it does not trust a
-head read from the same untrusted file. The recovery worker is documented in
+head read from the same untrusted file. `audit export` verifies a bounded
+segment before writing JSONL to stdout. `audit checkpoint` reads its signing
+key only from `LOOM_AUDIT_CHECKPOINT_KEY`; do not pass checkpoint keys as
+command-line arguments. `policy test` accepts the normal versioned policy
+document plus a bounded `tests` array. Each fixture supplies `principal`,
+`boundary`, `operation`, optional `version` and `capabilities`, and an
+`expected` value of `allow` or `deny`. `audit rotate` creates a newly signed
+checkpoint with the currently configured signer; archive the prior checkpoint
+before rotating and use a KMS/HSM-backed secret in production. The recovery worker is documented in
 [`RECOVERY.md`](RECOVERY.md) and never invokes a business handler.
 
 ## Incident response

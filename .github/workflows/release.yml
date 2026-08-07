@@ -46,7 +46,7 @@ jobs:
           echo "target_sha=$tag_sha" >>"$GITHUB_OUTPUT"
           for attempt in $(seq 1 90); do
             all_ready=true
-            for workflow in ci security container-scan; do
+            for workflow in ci security dependency-review container-scan; do
               if ! gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$tag_sha&per_page=100" \
                 --jq ".workflow_runs[] | select(.name == \"$workflow\" and .head_sha == \"$tag_sha\" and .conclusion == \"success\") | .id" | grep -q .; then
                 all_ready=false
@@ -157,9 +157,6 @@ jobs:
           set -eu
           for asset in dist/loom-*; do
             [ -f "$asset" ] || continue
-            case "$asset" in
-              *.json) continue ;;
-            esac
             cosign sign-blob --yes --bundle "$asset.sigstore.json" "$asset"
           done
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -191,6 +188,8 @@ jobs:
           path: dist
           pattern: loom-*
           merge-multiple: true
+      - name: Verify release artifacts before publication
+        run: sh ./scripts/verify-release-artifacts.sh dist
       - uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228
         with:
           tag_name: ${{ env.RELEASE_REF }}

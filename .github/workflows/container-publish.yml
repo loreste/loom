@@ -37,7 +37,7 @@ jobs:
           set -eu
           sha=$(git rev-list -n 1 "$RELEASE_REF")
           test "$sha" = "$(git rev-parse HEAD)"
-          for workflow in ci security container-scan; do
+          for workflow in ci security dependency-review container-scan; do
             ready=false
             for attempt in $(seq 1 90); do
               if gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$sha&per_page=100" \

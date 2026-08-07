@@ -85,11 +85,12 @@ operations that application should expose.
 The current repository release is `v0.1.8`; [`VERSION`](VERSION) is the
 release source of truth. See the [release page](https://github.com/loreste/loom/releases)
 for published binaries, checksums, signatures, SBOM, provenance, and the signed
-container image. The release includes the production OIDC verifier, while
-database isolation, provider lifecycle, secret management, and operational
-monitoring remain responsibilities of the integrating application. The SDK
-registry publication is pending trusted-publisher configuration; source
-checkout installation is available now.
+container image. The release includes a production-oriented OIDC/JWKS verifier,
+while database isolation, provider lifecycle, secret management, and
+operational monitoring remain responsibilities of the integrating application.
+The Python, TypeScript, and Rust SDK manifests are version-aligned; install
+those SDKs from the checkout until registry publication is confirmed in
+[`docs/RELEASES.md`](docs/RELEASES.md).
 
 ## Quick start
 

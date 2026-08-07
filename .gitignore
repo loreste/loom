@@ -49,5 +49,6 @@ CLAUDE.md
 .codex/
 .kimi-code/
 .agents/
+.tokensave/
 **/SKILL.md
 **/.agent/

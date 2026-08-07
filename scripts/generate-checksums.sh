@@ -18,7 +18,7 @@ trap 'rm -f "$tmp_file"' EXIT INT TERM
   for asset in loom-*; do
     [ -f "$asset" ] || continue
     case "$asset" in
-      *.sigstore.json|*sbom*.json|SHA256SUMS) continue ;;
+      *.sigstore.json|SHA256SUMS) continue ;;
     esac
     found=1
     if command -v sha256sum >/dev/null 2>&1; then

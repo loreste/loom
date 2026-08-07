@@ -20,6 +20,7 @@ each task.
 | Topic | Guide |
 | --- | --- |
 | Runtime guarantees and deployment boundaries | [`SECURITY.md`](SECURITY.md) |
+| Threat model, trust boundaries, abuse cases | [`THREAT-MODEL.md`](THREAT-MODEL.md) |
 | Identity verifier integration | [`IDENTITY.md`](IDENTITY.md) |
 | Tenant boundaries and PostgreSQL RLS | [`TENANCY.md`](TENANCY.md) |
 | Bounded input/output schema | [`SCHEMA.md`](SCHEMA.md) |
@@ -38,6 +39,7 @@ each task.
 | Package, image, and artifact publication | [`RELEASES.md`](RELEASES.md) |
 | Kubernetes and Helm deployment | [`KUBERNETES.md`](KUBERNETES.md) |
 | Release history | [`../CHANGELOG.md`](../CHANGELOG.md) |
+| v1 implementation evidence | [`V1-IMPLEMENTATION-REPORT.md`](V1-IMPLEMENTATION-REPORT.md) |
 
 ## Examples and source
 
@@ -49,6 +51,15 @@ each task.
   same `app.Call` path.
 - [`../examples/tenancy/`](../examples/tenancy/) shows the application and
   PostgreSQL RLS sides of tenant isolation.
+- [`../examples/telecom/`](../examples/telecom/) shows versioned multi-tenant
+  SIP/DID/routing/credit provisioning with approvals.
+- [`../examples/saas/`](../examples/saas/) validates the PostgreSQL RLS tenant
+  deployment contract.
+- [`../examples/ai-mcp/`](../examples/ai-mcp/) demonstrates governed AI/MCP
+  tool calls, constrained output, and non-authorizing discovery.
+- [`../examples/payment-reconciliation/`](../examples/payment-reconciliation/)
+  demonstrates approval-gated payment capture and `executed_unconfirmed`
+  provider reconciliation without handler replay.
 - [`../adapters/conformance/`](../adapters/conformance/) contains adapter
   conformance tests.
 

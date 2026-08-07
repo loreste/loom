@@ -1,20 +1,12 @@
-# Performance results
+# Performance and resilience evidence
 
-These numbers describe one local in-process benchmark, not a production SLA.
-Network adapters, identity providers, PostgreSQL, Redis, external APIs, host
-contention, operation complexity, and audit sinks change the result.
+Loom does not publish in-memory microbenchmarks as production throughput or an
+SLO. Database, Redis, identity-provider, external API, audit-sink, host, and
+replica contention materially change performance.
 
-## Reproduce
+## Adapter benchmark runner
 
 From the repository root:
-
-```bash
-GOCACHE=/tmp/loom-gocache go test -run '^$' \
-  -bench BenchmarkExecuteGranted -benchtime=2s ./runtime
-```
-
-The checked-in matrix runner records host and tool metadata and includes the
-HTTP adapter benchmark:
 
 ```bash
 LOOM_PERF_OUTPUT=/tmp/loom-performance \
@@ -23,46 +15,57 @@ LOOM_PERF_TIME=2s \
 sh scripts/performance.sh
 ```
 
-The runner currently covers the in-process and HTTP in-memory paths. It does
-not claim PostgreSQL, Redis, MCP, GraphQL, gRPC, Weft, replica-scale, or soak
-capacity. Those require deployment-specific harnesses and must publish their
-database/Redis versions, replica count, latency percentiles, allocation data,
-error/denial rates, and failure-injection method alongside the result.
+The runner records Go and host metadata and executes reproducible benchmarks
+for in-process, HTTP, MCP, GraphQL, gRPC, and Weft adapters. These benchmarks
+use in-memory dependencies and report Go benchmark means and allocations. They
+exclude PostgreSQL, Redis, external identity, external APIs, replica scale,
+failure injection, and soak behavior.
 
-The benchmark uses a fully wired in-memory test stack and a low-risk read
-operation. It excludes network, database, Redis, external identity, and
-provider latency.
+## Production-resilience harness contract
 
-## Recorded result
+Before publishing deployment results, run the same versioned Loom build against
+the supported PostgreSQL and Redis versions with:
 
-Run date: 2026-08-05  
-Host: Apple M4, darwin/arm64  
-Go: 1.26.5  
-Command: `go test -run '^$' -bench BenchmarkExecuteGranted -benchtime=2s ./runtime`
+- one, ten, and fifty API replicas plus separate recovery workers;
+- PostgreSQL restart/failover and injected slowdown;
+- Redis loss/reconnect and quota fail-closed checks;
+- concurrent approvals, idempotency retries, reconciliation, and audit-sink
+  slowdown/failure;
+- large policy sets and schema documents;
+- network latency/partition injection; and
+- a minimum 24-hour soak with a recovery backlog drain phase.
 
-```text
-BenchmarkExecuteGranted-10    382894    7789 ns/op
+The harness must retain its configuration, workload generator, failure-injection
+parameters, and raw output. It must never report a successful side effect when
+the durable result is `executed_unconfirmed`.
+
+## Required report
+
+Every production report must include:
+
+- throughput and error/denial rates;
+- p50, p95, p99, and maximum latency for requests and durable-store calls;
+- allocations and memory high-water mark;
+- PostgreSQL/Redis latency, errors, and availability;
+- recovery queue depth, oldest age, and backlog recovery time objective;
+- hardware, operating system, Go version, Loom commit, database/Redis versions;
+- replica and worker counts, operation mix, policy/schema sizes, and all
+  configuration values; and
+- exact commands and links to raw artifacts.
+
+The checked-in adapter benchmarks are useful regression signals, not evidence
+for these deployment claims. Publish deployment-specific results only after
+the external services and failure scenarios above have actually been run.
+
+The checked-in integration runner requires real services and records raw
+results; it does not create replicas or simulate failover:
+
+```bash
+LOOM_DATABASE_URL='postgres://...' \
+LOOM_REDIS_URL='redis://...' \
+LOOM_PERF_OUTPUT=/tmp/loom-resilience \
+sh scripts/performance-resilience.sh
 ```
 
-The HTTP benchmark is a regression signal for adapter overhead, not a network
-throughput claim. Run `scripts/performance.sh` on the target deployment and
-retain its `metadata.txt` with the result before setting an SLO.
-
-The benchmark is checked into `runtime/benchmark_test.go` so future changes
-can compare the same path. Treat the result as a regression signal, not a
-capacity promise. Publish deployment-specific p50, p95, p99, throughput,
-in-flight count, and durable-store latency before setting an operational
-budget.
-
-## What to measure in a deployment
-
-- latency by adapter and operation version;
-- authorization-stage latency and denial rate;
-- PostgreSQL and Redis latency/error rate;
-- audit-write latency and failures;
-- recovery queue depth and oldest age;
-- active executions and `executed_unconfirmed` age; and
-- external identity and provider lookup latency.
-
-Never put credentials, tokens, raw SQL, or customer identifiers in metric
-labels. See [`OBSERVABILITY.md`](OBSERVABILITY.md).
+Run the same command inside the deployment harness for each replica count and
+failure scenario, then attach its metadata and raw outputs to the report.

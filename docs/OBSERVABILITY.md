@@ -110,8 +110,10 @@ stable stream ID. PostgreSQL then owns `loom_audit_chain_heads`, assigns
 sequence numbers under `SELECT ... FOR UPDATE`, verifies the previous hash,
 enforces unique `(audit_stream, sequence_no)`, and records the active
 checkpoint ID. Use `AuditSink.RotateStream` for a checkpoint/rotation and
-`AuditSink.ChainHead` when exporting the trusted head. Do not wrap a
-coordinated PostgreSQL sink in a separate process-local hash chain.
+`AuditSink.ChainHead` when exporting the trusted head. `AuditSink.ExportStream`
+exports and verifies a bounded contiguous sequence range against a trusted
+prior hash; never take that prior hash from the same untrusted export. Do not
+wrap a coordinated PostgreSQL sink in a separate process-local hash chain.
 
 ## Correlation workflow
 
@@ -138,7 +140,8 @@ For an uncertain side effect:
 - `executed_unconfirmed` outcomes;
 - denials grouped by enforcement stage and stable reason code.
 
-The HTTP adapter can expose the collector as Prometheus text at `GET /metrics`. Protect that endpoint with the same network and identity controls used for other operational endpoints. The built-in collector intentionally provides counters and cumulative duration, not histogram buckets or a storage backend. Applications should add latency histograms, active executions, durable-store latency, and recovery-queue age in their telemetry system.
+The HTTP adapter exposes Prometheus text at `GET /metrics`. The built-in collector exports fixed execution-latency buckets, an in-flight execution gauge, durable-store aggregate latency/error counters, and recovery queue depth/age/attempt/renewal/dead-letter signals. Protect the endpoint with the same network and identity controls used for other operational endpoints. Applications should add deployment-specific labels and backend metrics without exposing credentials, request bodies, SQL, or customer identifiers.
+
 
 ## Recommended alerts and dashboards
 

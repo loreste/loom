@@ -1,79 +1,56 @@
 # Security notes
 
-Loom has been used internally for roughly two months and is now being published as open source. This document describes controls present in the repository and the responsibilities that remain with the deploying application.
+See [`THREAT-MODEL.md`](THREAT-MODEL.md) for trust boundaries, abuse cases,
+attacker goals, residual risks, and evidence required before claiming v1.0
+production readiness. Report vulnerabilities through the private process in
+[`../.github/SECURITY.md`](../.github/SECURITY.md).
 
 ## Runtime guarantees
 
-- Decisions default to deny.
-- Authentication, delegation, tenant resolution, boundary membership, policy, resource access, input/output field authorization, guardrails, risk, idempotency, approvals, quotas, execution status, output filtering, and audit are part of one pipeline.
+- Decisions default to deny; authentication never implies authorization.
+- Authentication, delegation, tenant resolution, boundary membership, policy,
+  resource and field access, guardrails, risk, idempotency, approvals, quotas,
+  execution status, output filtering, and audit use one governed pipeline.
 - Panics and enforcement errors fail closed.
-- Approval tokens are stored as hashes and consumed before the handler runs.
-- Idempotency keys are scoped by principal, boundary, operation, selected operation version, and request fingerprint.
-- Caller-supplied bypass headers, body credentials, and adapter metadata do not grant privilege.
-- Audit input and metadata are redacted recursively; opaque secrets such as idempotency keys are represented by digests.
-- SQL rejects multi-statements, comments, DDL/admin statements, dangerous functions, and tables outside the configured allowlist.
-- Financial amounts use exact `core.Money` values rather than `float64`.
-- Declared input and output schemas use bounded Loom Schema validation; unsupported schema keywords fail closed.
-- Output is filtered and redacted before it is returned to the caller.
-- A side effect whose post-execution recording cannot be confirmed returns `executed_unconfirmed` with an execution ID rather than pretending the operation was an ordinary denial.
+- Approval tokens are stored as hashes and consumed before handlers run.
+- Idempotency is scoped by principal, boundary, operation version, and request
+  fingerprint.
+- Adapter metadata, bypass headers, and body credentials cannot grant access.
+- Audit, logs, metrics, and traces redact secrets and use bounded identifiers.
+- A side effect whose durable result is uncertain returns
+  `executed_unconfirmed`, never a definite failure.
 
-## Durable state
+## Durable state and database boundaries
 
-Process-local stores are useful for development and tests. Production mode requires durable approval, quota, idempotency, execution-status, and audit components when registered operations need them.
+Process-local stores are for development and tests. Production configurations
+must provide durable approval, quota, idempotency, execution-status, and audit
+state for operations whose effects require them. The SQL guard is defense in
+depth, not a database sandbox: use restricted roles, PostgreSQL RLS, tenant-
+bound transactions, timeouts, connection limits, and database audit logging.
 
-- File-backed state is suitable for one node and survives process restart; it is not a multi-node coordination system.
-- PostgreSQL stores provide shared approval, audit, idempotency, policy, and execution-status state.
-- Redis provides shared quota state when configured.
-- Recovery workers claim leases and record completion; they never rerun the business handler.
+Application-layer tenant resolution does not replace database isolation. Use
+verified tenant claims, `tenancy.NewResolver`, tenant-bound transactions, and
+RLS. Keep break-glass access separate, approved, and audited.
 
-Configure durability based on the effects of registered operations. A read-only process may not need every stateful control, while a payment or provisioning operation needs the complete durable path.
+## Identity and cryptographic keys
 
-## Database boundaries
+`identity/oidc` performs configured OIDC discovery, bounded JWKS retrieval,
+issuer/audience validation, algorithm allowlisting, key rotation, and explicit
+claim mapping. It is not an identity provider or revocation service. Operators
+must manage issuer configuration, provider availability, signing-key rotation,
+revocation policy, and identity lifecycle.
 
-The SQL guard is defense in depth, not a parser-grade database sandbox. Use restricted database roles, read-only credentials where appropriate, PostgreSQL RLS for shared tenant tables, tenant-bound transactions, statement timeouts, connection limits, and database-level audit logging. Never pass a raw `*sql.DB` into an application handler; use Loom's governed database registry and executor.
+Audit checkpoints require a caller-provided signer. Production deployments
+should use a KMS/HSM-backed signer, rotate keys under dual control, retain old
+verification keys for the full audit-retention period, and preserve key
+version metadata with each checkpoint. Never put signing keys in source,
+command-line arguments, logs, metrics, or audit events.
 
-## Identity boundaries
+## Audit and observability
 
-Loom includes an embeddable `identity/oidc` verifier for configured OIDC
-discovery, JWKS rotation, issuer/audience validation, algorithm allowlists, and
-explicit claim mapping. It is not an identity provider, tenant directory, token
-revocation service, or enterprise identity lifecycle manager. Applications own
-issuer configuration, key and certificate rotation, revocation policy, provider
-availability, and identity administration. The built-in HMAC verifier is
-intended for controlled deployments and tests. Demo principals are development
-credentials, not production identities.
-
-
-See [`IDENTITY.md`](IDENTITY.md).
-
-## Tamper-evident compliance records
-
-Configure a durable audit sink and use `audit.NewHashChainSink` when the
-deployment needs evidence of modification. Create signed checkpoints with a
-caller-managed key, export events and checkpoints to an immutable destination,
-and verify them before compliance reports or retention cleanup. The hash chain
-detects changes; it does not make a mutable database immutable by itself.
-
-## Tenant boundaries
-
-Application-layer tenant resolution does not replace database isolation. Use verified tenant claims, `tenancy.NewResolver`, tenant-bound PostgreSQL transactions, and RLS for shared tables. Keep break-glass access separate, approved, and audited.
-
-See [`TENANCY.md`](TENANCY.md).
-
-## Network adapter boundaries
-
-HTTP, MCP, GraphQL, gRPC, CLI, Weft, and worker paths are untrusted adapter boundaries. They must translate into the same runtime entry point. Do not add header or request-body bypasses. Protect `/metrics`, `/readyz`, execution status, reconciliation, and discovery surfaces according to their documented authentication requirements. Do not expose development configuration or demo credentials on a public network.
-
-## Compliance logging boundary
-
-Loom provides structured decision and execution-lifecycle events with stable correlation IDs, operation versions, enforcement stages, outcomes, redacted fields, and payload digests. This supports review and incident correlation without turning the audit sink into a second unrestricted request-data store.
-
-Configure durable audit storage for production. PostgreSQL and file-backed sinks still require deployment controls for encryption, access, backups, retention, tamper evidence, and archival. Export to an immutable archive when regulation or internal policy requires it. Audit failure on an allow path is surfaced as an uncertain outcome because the handler may already have caused a side effect; reconciliation APIs are part of recovery.
-
-Metrics and application logs are supporting telemetry, not the authoritative security record. Do not put raw credentials, approval tokens, idempotency keys, SQL, request bodies, secret fields, or high-cardinality identifiers in logs, metrics, traces, or labels.
-
-See [`OBSERVABILITY.md`](OBSERVABILITY.md).
-
-## Reporting a vulnerability
-
-Do not disclose a suspected vulnerability in a public issue. Use the repository's private security contact, include reproduction steps and impact, and avoid sending real credentials or customer data.
+Use a durable coordinated PostgreSQL audit sink for multi-replica streams and
+the process-local `audit.HashChainSink` only for one-writer streams. A hash
+chain detects modification but does not make a mutable database immutable;
+export verified segments to an access-controlled WORM-capable archive when
+required by policy. Metrics and logs support operations but are not the
+authoritative security record.

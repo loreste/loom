@@ -34,7 +34,7 @@ jobs:
           set -eu
           sha=$(git rev-list -n 1 "$RELEASE_REF")
           test "$sha" = "$(git rev-parse HEAD)"
-          for workflow in ci security container-scan; do
+          for workflow in ci security dependency-review container-scan; do
             ready=false
             for attempt in $(seq 1 90); do
               if gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$sha&per_page=100" \
@@ -119,3 +119,81 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
         run: cargo publish --allow-dirty
+
+  registry-install:
+    name: Verify public registry installations
+    needs: [python, node, rust]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.RELEASE_REF }}
+      - name: Resolve published version
+        id: version
+        run: echo "value=${RELEASE_REF#v}" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version-file: go.mod
+      - name: Install Go module from public proxy
+        env:
+          SDK_VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          set -eu
+          tmp=$(mktemp -d)
+          trap 'rm -rf "$tmp"' EXIT
+          cd "$tmp"
+          go mod init loom-registry-consumer
+          GOPROXY=https://proxy.golang.org go get "github.com/loreste/loom@v${SDK_VERSION}"
+          test "$(GOPROXY=https://proxy.golang.org go list -m -f '{{.Version}}' github.com/loreste/loom)" = "v${SDK_VERSION}"
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+      - name: Install Python SDK from PyPI
+        env:
+          SDK_VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          for attempt in $(seq 1 12); do
+            if python -m pip install --no-cache-dir "loom-sdk==${SDK_VERSION}"; then
+              python -c 'import loom; print(loom.__file__)'
+              break
+            fi
+            [ "$attempt" -eq 12 ] && exit 1
+            sleep 10
+          done
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22.14.0"
+      - name: Install TypeScript SDK from npm
+        env:
+          SDK_VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          tmp=$(mktemp -d)
+          trap 'rm -rf "$tmp"' EXIT
+          for attempt in $(seq 1 12); do
+            if npm install --prefix "$tmp" "@loreste/loom-sdk@${SDK_VERSION}"; then
+              cd "$tmp"
+              node --input-type=module -e 'import "@loreste/loom-sdk"'
+              break
+            fi
+            [ "$attempt" -eq 12 ] && exit 1
+            sleep 10
+          done
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659
+        with:
+          toolchain: stable
+      - name: Install Rust SDK from crates.io
+        env:
+          SDK_VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          tmp=$(mktemp -d)
+          trap 'rm -rf "$tmp"' EXIT
+          cargo new --quiet "$tmp/consumer"
+          cd "$tmp/consumer"
+          for attempt in $(seq 1 12); do
+            if cargo add "loom-sdk@${SDK_VERSION}" && cargo check; then
+              break
+            fi
+            [ "$attempt" -eq 12 ] && exit 1
+            sleep 10
+          done

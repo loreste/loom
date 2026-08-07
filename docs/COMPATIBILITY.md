@@ -26,7 +26,12 @@ preserve unknown execution states and fields. PostgreSQL may expose
 meaning of existing allowed, denied, or reconciled outcomes.
 
 `operator_review` is a dead-letter state. A worker cannot move it backward; an
-approved administrative operation must explicitly requeue it. Lease renewal is
+approved administrative operation must explicitly requeue it. Durable
+deployments may expose governed `recovery.list`, `recovery.requeue`, and
+`recovery.dead_letter` operations when the execution store supports the
+recovery-admin interface. Requeue and dead-letter transitions require explicit
+policy grants, approval, idempotency, and lease/state guards; no control-plane
+client may mutate recovery rows directly. Lease renewal is
 guarded by execution ID and lease ID, so a stale worker cannot extend or
 complete another worker's claim.
 

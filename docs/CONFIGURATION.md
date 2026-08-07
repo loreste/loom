@@ -127,3 +127,20 @@ loom serve
 
 Use `loom help` for the current command list. Use `loom version` to see the
 binary version and build metadata.
+
+## Recovery worker settings
+
+`loom recovery-worker` requires an application-owned HTTPS verifier URL; HTTP is permitted only for localhost during development. The command accepts equivalent flags, while these environment variables are convenient in deployment manifests:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `LOOM_RECOVERY_VERIFIER_URL` | empty | Required provider-verification endpoint; HTTPS is required outside localhost. |
+| `LOOM_RECOVERY_VERIFIER_TOKEN` | empty | Optional bearer token for the verifier endpoint. |
+| `LOOM_RECOVERY_OWNER` | `loom-recovery-worker` | Unique worker owner name. |
+| `LOOM_RECOVERY_LEASE` | `5m` | Lease duration. |
+| `LOOM_RECOVERY_POLL` | `5s` | Queue polling interval. |
+| `LOOM_RECOVERY_BACKOFF_BASE` | `1s` | Initial retry backoff. |
+| `LOOM_RECOVERY_BACKOFF_MAX` | `5m` | Maximum retry backoff. |
+| `LOOM_RECOVERY_MAX_ATTEMPTS` | `8` | Automatic attempts before operator review. |
+
+The verifier must perform an authoritative provider lookup and must not trust a caller-supplied success flag. The recovery worker never invokes the original business handler. See [`RECOVERY.md`](RECOVERY.md).

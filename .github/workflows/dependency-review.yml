@@ -3,6 +3,8 @@ name: dependency-review
 on:
   pull_request:
     branches: [main, master]
+  push:
+    tags: ["v*"]
 
 permissions:
   contents: read
@@ -17,3 +19,6 @@ jobs:
       # Dependency review is a required security gate. Enable the repository
       # dependency graph before merging changes that add or update packages.
       - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294
+        with:
+          base-ref: ${{ github.event.repository.default_branch }}
+          head-ref: ${{ github.sha }}

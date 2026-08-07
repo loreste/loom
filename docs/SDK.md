@@ -12,6 +12,8 @@ the HTTP adapter.
 Package manifests are kept equal to the Loom release tag and checked before
 publication. The publication workflow still requires trusted-publisher setup
 in each registry; version alignment alone does not mean a package is available.
+Cross-language request/response semantics are versioned in
+[`../conformance/fixtures/execute-semantics.v1.json`](../conformance/fixtures/execute-semantics.v1.json).
 
 ## Install released SDKs
 
