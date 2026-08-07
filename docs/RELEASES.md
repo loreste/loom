@@ -33,8 +33,13 @@ image or release artifacts.
 ## Release gate
 
 Tag pushes run Go CI, security scanning, and container scanning for the exact
-tag commit. Binary, SDK, and image publication waits for those workflows. A
-release must be cut from a clean, reviewed commit; dependency and security
+tag commit. Binary, SDK, and image publication waits for those workflows. The
+release workflow also supports an explicit manual rerun for an existing tag
+after a transient publication failure:
+
+    gh workflow run release.yml --ref main -f ref=vX.Y.Z
+
+A release must be cut from a clean, reviewed commit; dependency and security
 checks on the pull request remain required before merge.
 
 ## Verify a release offline
