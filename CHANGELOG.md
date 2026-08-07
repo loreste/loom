@@ -6,7 +6,19 @@ All notable changes to Loom are documented here. The format follows
 
 ## [Unreleased]
 
-No unreleased changes.
+### Changed
+
+- Release reruns can target an existing immutable tag and publish the requested
+  GitHub Release instead of the workflow's branch ref.
+- SDK publication documentation now lists the exact PyPI, npm, and crates.io
+  trusted-publisher configuration; npm clears injected token authentication
+  before attempting OIDC publication.
+
+### Fixed
+
+- Release checksum generation now preserves downloaded binary artifacts by
+  checking out source before downloading them.
+- The PyPI publication action is pinned to a valid container-backed release.
 
 ## [0.1.8] — 2026-08-07
 
