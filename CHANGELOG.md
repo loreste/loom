@@ -6,6 +6,28 @@ All notable changes to Loom are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-08-07
+
+### Fixed
+
+- The release publish job downloaded artifacts without checking out the
+  repository, so `scripts/verify-release-artifacts.sh` was absent and
+  publication failed after every artifact had already been built, signed, and
+  attested. Checkout now precedes the download, which would otherwise clear the
+  downloaded `dist` directory.
+- `SHA256SUMS` was never attached to a release. The publish step globbed
+  `dist/loom-*`, which does not match the manifest, so `scripts/install.sh` —
+  which fetches it with `curl --fail` and verifies the binary against it —
+  could not succeed for any release, including v0.2.0 and earlier.
+- The checksum and signature jobs depended only on the binaries, so the SBOM
+  was absent from `dist` when they ran and was therefore neither checksummed
+  nor signed. This silently negated the earlier removal of the `*sbom*.json`
+  and `*.json` exclusions from those steps. Both jobs now also depend on the
+  SBOM job.
+- The Python, TypeScript, and Rust SDK `User-Agent` strings were pinned to
+  0.1.8 and had not moved since that release, so `scripts/check-sdk-versions.sh`
+  failed against the release version. They now track the release.
+
 ## [0.2.0] — 2026-08-07
 
 ### Breaking

@@ -89,7 +89,7 @@ operations that application should expose.
 
 ## Status
 
-The current repository release is `v0.2.0`; [`VERSION`](VERSION) is the
+The current repository release is `v0.2.1`; [`VERSION`](VERSION) is the
 release source of truth. See the [release page](https://github.com/loreste/loom/releases)
 for published binaries, checksums, signatures, SBOM, provenance, and the signed
 container image. The release includes a production-oriented OIDC/JWKS verifier,

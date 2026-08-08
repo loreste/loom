@@ -11,8 +11,8 @@ with a `v` prefix, for example `VERSION=X.Y.Z` and tag `vX.Y.Z`.
 - a signed multi-architecture image at `ghcr.io/<owner>/<repository>`; and
 - the GitHub release's package of checksums, signatures, SBOM, and provenance.
 
-For v0.2.0, the Go module, binaries, image, and release evidence are
-available. The Python, TypeScript, and Rust manifests match 0.2.0, and the SDK
+For v0.2.1, the Go module, binaries, image, and release evidence are
+available. The Python, TypeScript, and Rust manifests match 0.2.1, and the SDK
 publication workflow verifies that alignment, but registry publication is
 pending trusted-publisher configuration. Do not assume those packages are
 available until the publication workflow succeeds.
