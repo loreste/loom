@@ -1,19 +1,14 @@
 name: container-scan
 
 on:
+  # No paths filter on push: GitHub applies one filter to the whole push
+  # block, so a release commit that only touches VERSION and documentation
+  # would skip the scan. The release gate requires a container-scan success at
+  # the exact tag SHA, so a skipped scan makes a release unpublishable.
+  # Pull requests keep the path filter, where the cost matters most.
   push:
     branches: [main, master]
     tags: ["v*"]
-    paths:
-      - "Dockerfile"
-      - "docker-compose.yml"
-      - ".dockerignore"
-      - "go.mod"
-      - "go.sum"
-      - "cmd/**"
-      - "app/**"
-      - "runtime/**"
-      - "store/**"
   pull_request:
     paths:
       - "Dockerfile"

@@ -27,6 +27,11 @@ All notable changes to Loom are documented here. The format follows
 - The Python, TypeScript, and Rust SDK `User-Agent` strings were pinned to
   0.1.8 and had not moved since that release, so `scripts/check-sdk-versions.sh`
   failed against the release version. They now track the release.
+- `container-scan` filtered its push trigger by path, and GitHub applies that
+  filter to tag pushes as well, so a release commit touching only `VERSION`
+  and documentation never scanned. The release gate requires a `container-scan`
+  success at the exact tag SHA, which made such a release unpublishable. The
+  push trigger no longer filters by path; pull requests still do.
 
 ## [0.2.0] — 2026-08-07
 
