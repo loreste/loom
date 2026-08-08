@@ -92,10 +92,9 @@ jobs:
           registry-url: https://registry.npmjs.org
       - name: Build and publish package with provenance
         working-directory: sdk/typescript
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          npm install --global npm@11.5.1
-          unset NODE_AUTH_TOKEN
-          npm config delete //registry.npmjs.org/:_authToken
           npm install --no-package-lock
           npm run build
           npm publish --provenance --access public
