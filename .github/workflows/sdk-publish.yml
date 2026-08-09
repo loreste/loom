@@ -1,12 +1,10 @@
 name: sdk-publish
 
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
     inputs:
       ref:
-        description: "Tag to publish"
+        description: "Tag to publish (e.g. v1.0.0)"
         required: true
         type: string
 
