@@ -98,7 +98,7 @@ func (s *Sink) deliver(ctx context.Context, ev audit.Event) error {
 	if err != nil {
 		return fmt.Errorf("deliver: %w", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("endpoint returned %d", resp.StatusCode)
 	}
