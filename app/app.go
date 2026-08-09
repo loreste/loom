@@ -57,6 +57,8 @@ type Config struct {
 	PolicyEngine     policy.Engine
 	ResourceChecker  resource.Checker
 	TenantResolver   runtime.TenantResolver
+	// Tracer enables per-stage distributed tracing. See observability/otel.
+	Tracer           runtime.Tracer
 }
 
 // App is an in-process Loom application.
@@ -195,6 +197,7 @@ func New(cfg Config) (*App, error) {
 		Audit:                  audit.NewLogger(sink),
 		Observer:               metrics,
 		Tenant:                 cfg.TenantResolver,
+		Tracer:                 cfg.Tracer,
 		AllowAnonymous:         cfg.AllowAnonymous,
 		DeferDurableValidation: production && !cfg.RequireDurableSecurityState,
 	})

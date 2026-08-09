@@ -57,6 +57,17 @@ type DurableStoreObserver interface {
 	ObserveDurableStore(duration time.Duration, failed bool)
 }
 
+// Tracer emits per-stage spans for the execution pipeline. When nil on
+// Dependencies, stage tracing is disabled with zero overhead. The runtime
+// creates one parent span per Execute call and records stage events within it.
+type Tracer interface {
+	// Start begins a named span, returning a child context and a function
+	// that ends the span. The caller must call the returned function.
+	Start(ctx context.Context, name string) (context.Context, func())
+	// Event records a timestamped event on the span in ctx.
+	Event(ctx context.Context, name string)
+}
+
 // ObserverFunc adapts a function to Observer.
 type ObserverFunc func(Observation)
 
