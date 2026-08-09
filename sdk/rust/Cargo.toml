@@ -1,6 +1,6 @@
 [package]
 name = "loom-sdk"
-version = "0.2.1"
+version = "1.0.0"
 edition = "2021"
 description = "Loom Universal Runtime Rust SDK (HTTP client)"
 repository = "https://github.com/loreste/loom"
