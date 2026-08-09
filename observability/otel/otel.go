@@ -106,6 +106,27 @@ func (b *Bridge) End() {
 	}
 }
 
+// Start begins a named span for pipeline stage tracing. The returned function
+// must be called to end the span. Implements runtime.Tracer.
+func (b *Bridge) Start(ctx context.Context, name string) (context.Context, func()) {
+	if b == nil || b.tracer == nil {
+		return ctx, func() {}
+	}
+	ctx, span := b.tracer.Start(ctx, name)
+	return ctx, func() { span.End() }
+}
+
+// Event records a timestamped event on the current span. Implements runtime.Tracer.
+func (b *Bridge) Event(ctx context.Context, name string) {
+	if b == nil {
+		return
+	}
+	span := trace.SpanFromContext(ctx)
+	if span != nil && span.IsRecording() {
+		span.AddEvent("loom.stage." + name)
+	}
+}
+
 // Observe records one final execution observation. It does not create a new
 // span after the operation; when a caller already supplied a trace context,
 // it annotates that span instead.

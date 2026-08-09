@@ -65,6 +65,9 @@ type Dependencies struct {
 	ExecutionStatus     execution.Store
 	Audit               *audit.Logger
 	Observer            Observer
+	// Tracer enables per-stage distributed tracing spans. Nil disables with
+	// zero overhead. See observability/otel for the maintained implementation.
+	Tracer              Tracer
 
 	// AllowAnonymous is false by default. If true, empty credentials get a synthetic
 	// unauthenticated identity that still must pass policy (almost always deny).
@@ -426,12 +429,21 @@ func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Res
 		return rt.deny(ctx, req, core.Identity{}, nil, core.RiskLow, "context", core.ReasonContextCanceled, ctxErrMessage(err), start, "")
 	}
 
+	// Pipeline tracing: one parent span covers the entire execution; stage
+	// events mark transitions without creating per-stage child spans.
+	if rt.deps.Tracer != nil {
+		var endTrace func()
+		ctx, endTrace = rt.deps.Tracer.Start(ctx, "loom.execute")
+		defer endTrace()
+	}
+
 	// 0. Normalize input map
 	if req.Input == nil {
 		req.Input = map[string]any{}
 	}
 
 	// 1. Authenticate
+	rt.traceEvent(ctx, "authenticate")
 	id, err := rt.authenticate(ctx, req)
 	if err != nil {
 		return rt.deny(ctx, req, core.Identity{}, nil, core.RiskLow, "authenticate", core.ReasonUnauthenticated, err.Error(), start, "")
@@ -466,6 +478,7 @@ func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Res
 	}
 
 	// 3. Boundary
+	rt.traceEvent(ctx, "boundary")
 	if err := rt.deps.Boundary.Allow(ctx, id, req.Boundary); err != nil {
 		return rt.deny(ctx, req, id, nil, core.RiskLow, "boundary", core.ReasonBoundaryViolation, err.Error(), start, "")
 	}
@@ -478,6 +491,7 @@ func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Res
 	selectedVersion = op.Version
 
 	// 4. Operation permission
+	rt.traceEvent(ctx, "policy")
 	dec := rt.deps.Policy.CheckOperationPermission(ctx, id, op)
 	if !dec.Decision.Allowed() {
 		reason := dec.Reason
@@ -515,6 +529,7 @@ func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Res
 	}
 
 	// 8. Guardrails
+	rt.traceEvent(ctx, "guardrails")
 	if err := rt.ValidateOperation(op); err != nil {
 		return rt.deny(ctx, req, id, op, core.RiskLow, "production", core.ReasonInternal, err.Error(), start, "")
 	}
@@ -527,6 +542,7 @@ func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Res
 	}
 
 	// 9. Risk
+	rt.traceEvent(ctx, "risk")
 	riskLevel := rt.deps.Risk.Evaluate(ctx, id, op, &req)
 	if rt.deps.RiskBlock != nil {
 		if msg := rt.deps.RiskBlock.Check(id, riskLevel); msg != "" {
@@ -535,6 +551,7 @@ func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Res
 	}
 
 	// 10. Idempotency lookup BEFORE approval/quota consumption.
+	rt.traceEvent(ctx, "gates")
 	// Authorized callers with the same key+fingerprint get a replay without
 	// re-consuming single-use approval tokens or quota. Authn/authz already ran.
 	var (
@@ -621,6 +638,7 @@ func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Res
 	}
 
 	// 14. Execute
+	rt.traceEvent(ctx, "handler")
 	handler, err := rt.deps.Registry.HandlerVersion(op.Name, op.Version)
 	if err != nil {
 		return rt.deny(ctx, req, id, op, riskLevel, "execute", core.ReasonHandlerMissing, err.Error(), start, "")
@@ -671,6 +689,7 @@ func (rt *Runtime) Execute(ctx context.Context, req core.Request) (resp core.Res
 
 	// 14. Validate and filter output. A declared output contract is mandatory
 	// when present; malformed or unexpected handler output is never returned.
+	rt.traceEvent(ctx, "output")
 	if len(op.OutputSchema) > 0 {
 		if err := guardrails.ValidateSchema(op.OutputSchema, result.Output); err != nil {
 			return rt.deny(ctx, req, id, op, riskLevel, "output_schema", core.ReasonOutputFilter, err.Error(), start, "")
@@ -1051,6 +1070,12 @@ func ctxErrMessage(err error) string {
 		return "context deadline exceeded"
 	}
 	return "context canceled"
+}
+
+func (rt *Runtime) traceEvent(ctx context.Context, name string) {
+	if rt.deps.Tracer != nil {
+		rt.deps.Tracer.Event(ctx, name)
+	}
 }
 
 // refundQuota rolls back the quota unit charged for an execution that failed
