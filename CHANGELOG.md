@@ -6,6 +6,48 @@ All notable changes to Loom are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.0.0] — 2026-08-09
+
+### Added
+
+- **Webhook notifications** (`webhook/`): `audit.Sink` that delivers events to
+  HTTP endpoints with HMAC-SHA256 signing, configurable filtering, and
+  fail-open or fail-closed delivery modes.
+- **Pipeline tracing** (`runtime.Tracer`): per-stage span events through the
+  execution pipeline. The `observability/otel` bridge implements both
+  `Observer` and `Tracer`; zero overhead when nil.
+- **Declarative policy** (`policy.LoadFile`, `policy.LoadInto`): JSON file
+  loader for policy rules with atomic replacement and round-trip serialization.
+- CLI policy management: `loom policy lint`, `test`, `diff`, `explain`,
+  `simulate` for operator-safe policy inspection and validation.
+- Recovery administration: `loom recovery list`, `approve`, `reject`,
+  `dead-letter` with authenticated access control.
+- Operator CLI: `loom operator status`, `metrics`, `config` for operational
+  visibility.
+- Conformance fixtures (`conformance/fixtures/`) for cross-SDK protocol
+  validation.
+- Threat model documentation (`docs/THREAT-MODEL.md`).
+- Security policy (`.github/SECURITY.md`).
+- Examples: SaaS multi-tenant, telecom provisioning, AI/MCP tool governance,
+  and payment reconciliation.
+
+### Changed
+
+- `runtime.Dependencies` accepts an optional `Tracer` for distributed tracing.
+- `observability/otel.Bridge` implements `runtime.Tracer` in addition to
+  `Observer` and `ActiveObserver`.
+- `app.Config` accepts an optional `Tracer`.
+- Durable-store and recovery metrics are now written by the runtime and
+  recovery worker; previously exported but never populated.
+- `loom_execute_duration_seconds` is now a full histogram with `_sum`,
+  `_count`, and `le` buckets.
+- Release documentation updated to reflect trusted-publisher SDK publication.
+
+### Fixed
+
+- npm SDK publication auth failure caused by the workflow unsetting
+  `NODE_AUTH_TOKEN` after upgrading npm globally.
+
 ## [0.2.1] — 2026-08-07
 
 ### Fixed

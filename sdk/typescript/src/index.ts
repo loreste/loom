@@ -76,7 +76,7 @@ export class Client {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       "X-Loom-Protocol-Version": "1",
-			"User-Agent": "loom-typescript-sdk/0.2.1",
+			"User-Agent": "loom-typescript-sdk/1.0.0",
     };
     const bearer = opts.token ?? this.token;
     if (bearer) headers["Authorization"] = `Bearer ${bearer}`;
@@ -131,7 +131,7 @@ export class Client {
     const url = `${this.baseUrl.replace(/\/$/, "")}/mcp`;
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
-			"User-Agent": "loom-typescript-sdk/0.2.1",
+			"User-Agent": "loom-typescript-sdk/1.0.0",
       "X-Loom-Protocol-Version": "1",
     };
     const bearer = token ?? this.token;
@@ -154,7 +154,7 @@ export class Client {
   ): Promise<Record<string, unknown>> {
     const url = `${this.baseUrl.replace(/\/$/, "")}${path}`;
     const headers: Record<string, string> = {
-			"User-Agent": "loom-typescript-sdk/0.2.1",
+			"User-Agent": "loom-typescript-sdk/1.0.0",
       "X-Loom-Protocol-Version": "1",
     };
     if (auth) {
