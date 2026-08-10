@@ -52,12 +52,20 @@ release tag and does not guess a version:
 
 ```bash
 export LOOM_REPOSITORY=loreste/loom
-export LOOM_VERSION=vX.Y.Z
+export LOOM_VERSION=v1.0.1
 curl --fail --location \
   "https://raw.githubusercontent.com/${LOOM_REPOSITORY}/${LOOM_VERSION}/scripts/install.sh" \
   | sh
 
 ~/.local/bin/loom version
+```
+
+From a repository checkout of the same tag:
+
+```bash
+export LOOM_REPOSITORY=loreste/loom
+export LOOM_VERSION=v1.0.1
+sh scripts/install.sh
 ```
 
 Set `LOOM_INSTALL_DIR` to use another destination. The installer downloads the
@@ -105,7 +113,7 @@ policy and resource access, and call only through `app.Call`. See
 ## Install the SDKs
 
 The Go SDK is part of the Go module and is available via git tags. Python,
-TypeScript, and Rust SDK manifests are version-aligned, but as of v1.0.0 they
+TypeScript, and Rust SDK manifests are version-aligned, but as of v1.0.1 they
 are **not** published to public registries. Install from the repository until
 [`RELEASES.md`](RELEASES.md) and [`release-manifest.json`](../release-manifest.json)
 mark a coordinate `published: true`. The Python distribution name is

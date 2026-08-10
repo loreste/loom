@@ -17,7 +17,7 @@ Cross-language request/response semantics are versioned in
 
 ## Install SDKs
 
-**As of v1.0.0, only the Go module is available from a public registry.**
+**As of v1.0.1, only the Go module is available from a public registry.**
 Python (`loreste-loom`), npm (`@loreste/loom-sdk`), and crates.io (`loom-sdk`)
 publication is pending. See [`RELEASES.md`](RELEASES.md) and
 [`release-manifest.json`](../release-manifest.json). Do not install PyPI

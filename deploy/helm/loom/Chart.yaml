@@ -2,6 +2,6 @@ apiVersion: v2
 name: loom
 description: Loom execution-governance runtime API and recovery worker
 type: application
-version: 1.0.0
-appVersion: 1.0.0
+version: 1.0.1
+appVersion: 1.0.1
 kubeVersion: ">=1.25.0-0"

@@ -47,8 +47,18 @@ func (c Config) PlatformConfig() bootstrap.Config {
 		}
 		// Development may omit the secret only when not production-validated.
 		// Platform still requires a secret unless AllowUnsigned is set.
+		// Production Validate() forbids missing secret and nondurable webhooks.
 		if c.WebhookSecret == "" && !c.IsProduction() {
 			cfg.Webhook.AllowUnsigned = true
+		}
+	}
+	if c.OIDCIssuer != "" {
+		cfg.OIDC = bootstrap.OIDCConfig{
+			Issuer:          c.OIDCIssuer,
+			Audience:        c.OIDCAudience,
+			Algorithms:      append([]string(nil), c.OIDCAlgorithms...),
+			ClaimBoundary:   c.OIDCClaimBoundary,
+			RequireBoundary: c.OIDCRequireBoundary,
 		}
 	}
 	return cfg

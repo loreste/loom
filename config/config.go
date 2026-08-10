@@ -80,6 +80,17 @@ type Config struct {
 	// WebhookRunWorker starts an in-process delivery worker with the API.
 	// Prefer a separate loom webhook-worker process in multi-replica deploys.
 	WebhookRunWorker bool
+
+	// OIDCIssuer enables the production OIDC/JWKS verifier when non-empty.
+	OIDCIssuer string
+	// OIDCAudience is required with OIDCIssuer (exact aud match).
+	OIDCAudience string
+	// OIDCAlgorithms is the allowlist of signing algorithms (default RS256).
+	OIDCAlgorithms []string
+	// OIDCClaimBoundary is the claim mapped to Identity.Boundary (default tenant_id).
+	OIDCClaimBoundary string
+	// OIDCRequireBoundary requires the boundary claim when true (default true when OIDC enabled).
+	OIDCRequireBoundary bool
 }
 
 // Load reads LOOM_* environment variables with safe defaults.
@@ -118,6 +129,12 @@ func Load() Config {
 		// not silently fall back to inline nondurable delivery.
 		WebhookDurable:   envBool("LOOM_WEBHOOK_DURABLE", os.Getenv("LOOM_DATABASE_URL") != ""),
 		WebhookRunWorker: envBool("LOOM_WEBHOOK_RUN_WORKER", false),
+
+		OIDCIssuer:          strings.TrimSpace(os.Getenv("LOOM_OIDC_ISSUER")),
+		OIDCAudience:        strings.TrimSpace(os.Getenv("LOOM_OIDC_AUDIENCE")),
+		OIDCAlgorithms:      splitCSV(env("LOOM_OIDC_ALGS", "RS256")),
+		OIDCClaimBoundary:   env("LOOM_OIDC_CLAIM_BOUNDARY", "tenant_id"),
+		OIDCRequireBoundary: envBool("LOOM_OIDC_REQUIRE_BOUNDARY", true),
 	}
 	return c
 }
@@ -178,9 +195,34 @@ func (c Config) Validate() error {
 			if c.WebhookAllowPrivate {
 				return fmt.Errorf("LOOM_WEBHOOK_ALLOW_PRIVATE is not permitted when LOOM_ENV=%s", c.Env)
 			}
+			// Production must never silently use inline nondurable delivery.
+			if !c.WebhookDurable {
+				return fmt.Errorf("LOOM_ENV=%s requires LOOM_WEBHOOK_DURABLE=true when LOOM_WEBHOOK_URL is set", c.Env)
+			}
+			if c.DatabaseURL == "" {
+				return fmt.Errorf("LOOM_ENV=%s requires LOOM_DATABASE_URL for durable webhook outbox", c.Env)
+			}
+		}
+		if c.WebhookDurable && c.DatabaseURL == "" {
+			return fmt.Errorf("LOOM_WEBHOOK_DURABLE requires LOOM_DATABASE_URL")
 		}
 	} else if c.WebhookSecret != "" {
 		return fmt.Errorf("LOOM_WEBHOOK_SECRET set without LOOM_WEBHOOK_URL")
+	}
+	if c.OIDCIssuer != "" {
+		if c.OIDCAudience == "" {
+			return fmt.Errorf("LOOM_OIDC_ISSUER requires LOOM_OIDC_AUDIENCE")
+		}
+		if len(c.OIDCAlgorithms) == 0 {
+			return fmt.Errorf("LOOM_OIDC_ISSUER requires at least one algorithm in LOOM_OIDC_ALGS")
+		}
+		for _, alg := range c.OIDCAlgorithms {
+			if strings.EqualFold(alg, "none") || strings.TrimSpace(alg) == "" {
+				return fmt.Errorf("LOOM_OIDC_ALGS must not include empty or none")
+			}
+		}
+	} else if c.OIDCAudience != "" {
+		return fmt.Errorf("LOOM_OIDC_AUDIENCE set without LOOM_OIDC_ISSUER")
 	}
 	if c.IsProduction() {
 		if !c.DisableDemoPrincipals && !c.AllowDemo {

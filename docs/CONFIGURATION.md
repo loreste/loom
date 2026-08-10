@@ -48,10 +48,21 @@ PostgreSQL or file data directory, Redis, and a JWT secret.
 | `LOOM_JWT_AUDIENCE` | empty | Expected JWT audience. Required in production-like profiles. |
 | `LOOM_TENANT_CLAIM` | empty | Verified JWT claim copied to Loom's `tenant_id` attribute. |
 
-The built-in HMAC verifier is intended for controlled deployments and tests.
-Embed `identity/oidc` for OIDC discovery and JWKS rotation, and configure its
-issuer, audience, algorithm allowlist, response limits, and claim mappings
-explicitly. See [`IDENTITY.md`](IDENTITY.md) for the production requirements.
+## OIDC / JWKS (production identity)
+
+When `LOOM_OIDC_ISSUER` is set, bootstrap constructs `identity/oidc.Verifier`,
+registers it as scheme `oidc`, and tries it for `bearer` credentials after the
+HMAC JWT verifier fails. Discovery/JWKS readiness is registered on `/readyz`.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `LOOM_OIDC_ISSUER` | empty | HTTPS issuer URL (discovery). Empty disables OIDC. |
+| `LOOM_OIDC_AUDIENCE` | empty | Exact audience. Required when issuer is set. |
+| `LOOM_OIDC_ALGS` | `RS256` | Comma-separated signing algorithm allowlist (`none` forbidden). |
+| `LOOM_OIDC_CLAIM_BOUNDARY` | `tenant_id` | Claim mapped to `Identity.Boundary`. |
+| `LOOM_OIDC_REQUIRE_BOUNDARY` | `true` | Require the boundary claim. |
+
+See [`IDENTITY.md`](IDENTITY.md) for claim mapping and production requirements.
 
 ## Policy synchronization
 
@@ -94,12 +105,18 @@ Signed envelopes include event id, timestamp, content digest, and `v1` HMAC.
 
 ### Durable outbox
 
-When `LOOM_WEBHOOK_DURABLE=true` and PostgreSQL is configured, audit `Write`
-only inserts into `loom_webhook_outbox`. A worker (`loom webhook-worker` or
+When `LOOM_WEBHOOK_DURABLE=true` and PostgreSQL is configured, the Postgres
+audit sink enqueues into `loom_webhook_outbox` **in the same transaction** as
+the audit insert (atomic durability). A worker (`loom webhook-worker` or
 `LOOM_WEBHOOK_RUN_WORKER=true`) claims leases, delivers signed HTTPS requests,
 applies bounded exponential backoff, and dead-letters exhausted attempts.
-Duplicate `event_id` enqueues are no-ops, so MultiSink retries are safe.
-Delivery failure never rewrites a completed business effect as unexecuted.
+Duplicate `event_id` enqueues are no-ops. Delivery failure never rewrites a
+completed business effect as unexecuted.
+
+Production (`LOOM_ENV=production|prod|staging`) refuses:
+- webhooks without `LOOM_WEBHOOK_DURABLE=true`;
+- durable webhooks without `LOOM_DATABASE_URL`;
+- HTTP/private destinations and missing signing secrets.
 
 ## Compliance audit configuration
 

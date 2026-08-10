@@ -11,16 +11,16 @@ with a `v` prefix, for example `VERSION=X.Y.Z` and tag `vX.Y.Z`.
 - a signed multi-architecture image at `ghcr.io/<owner>/<repository>`; and
 - the GitHub release's package of checksums, signatures, SBOM, and provenance.
 
-For v1.0.0, the Go module, binaries, image, checksums, signatures, SBOM, and
+For v1.0.1, the Go module, binaries, image, checksums, signatures, SBOM, and
 provenance evidence are available from the GitHub release and GHCR. The
 machine-readable inventory is [`release-manifest.json`](../release-manifest.json).
 
 **Python, TypeScript/npm, and Rust SDKs are not published to public registries
-for v1.0.0.** The v1 tag's SDK publication workflow failed, and automatic
-tag-triggered SDK publishing is disabled until trusted-publisher configuration
-and conflict-free package identities are confirmed. Install those SDKs from a
-repository checkout until an unauthenticated public install of the exact
-version succeeds and this document is updated.
+for v1.0.1.** Automatic tag-triggered SDK publishing remains disabled until
+trusted-publisher configuration and conflict-free package identities are
+confirmed. Install those SDKs from a repository checkout until an
+unauthenticated public install of the exact version succeeds and this document
+is updated.
 
 Intended registry coordinates (not yet public):
 

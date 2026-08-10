@@ -49,6 +49,7 @@ func TestProductionRejectsUnsafeWebhook(t *testing.T) {
 	t.Setenv("LOOM_REQUIRE_DURABLE", "true")
 	t.Setenv("LOOM_DISABLE_DEMO_PRINCIPALS", "true")
 	t.Setenv("LOOM_DATA_DIR", t.TempDir())
+	t.Setenv("LOOM_DATABASE_URL", "postgres://loom:loom@127.0.0.1:5432/loom?sslmode=disable")
 	t.Setenv("LOOM_REDIS_URL", "redis://127.0.0.1:6379/0")
 	t.Setenv("LOOM_JWT_SECRET", "configured-test-secret-1234")
 	t.Setenv("LOOM_JWT_ISSUER", "https://issuer.example")
@@ -67,6 +68,38 @@ func TestProductionRejectsUnsafeWebhook(t *testing.T) {
 	t.Setenv("LOOM_WEBHOOK_ALLOW_PRIVATE", "true")
 	if err := config.Load().Validate(); err == nil {
 		t.Fatal("production webhook AllowPrivate must fail")
+	}
+	t.Setenv("LOOM_WEBHOOK_ALLOW_PRIVATE", "false")
+	t.Setenv("LOOM_WEBHOOK_DURABLE", "false")
+	if err := config.Load().Validate(); err == nil {
+		t.Fatal("production must refuse nondurable webhooks")
+	}
+	t.Setenv("LOOM_WEBHOOK_DURABLE", "true")
+	t.Setenv("LOOM_DATABASE_URL", "")
+	if err := config.Load().Validate(); err == nil {
+		t.Fatal("durable webhook without database URL must fail")
+	}
+}
+
+func TestOIDCConfigValidation(t *testing.T) {
+	t.Setenv("LOOM_OIDC_ISSUER", "https://issuer.example/realms/loom")
+	t.Setenv("LOOM_OIDC_AUDIENCE", "")
+	if err := config.Load().Validate(); err == nil {
+		t.Fatal("OIDC issuer without audience must fail")
+	}
+	t.Setenv("LOOM_OIDC_AUDIENCE", "loom-api")
+	t.Setenv("LOOM_OIDC_ALGS", "none")
+	if err := config.Load().Validate(); err == nil {
+		t.Fatal("OIDC alg none must fail")
+	}
+	t.Setenv("LOOM_OIDC_ALGS", "RS256")
+	c := config.Load()
+	if err := c.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	p := c.PlatformConfig()
+	if p.OIDC.Issuer == "" || p.OIDC.Audience != "loom-api" {
+		t.Fatalf("OIDC not mapped: %+v", p.OIDC)
 	}
 }
 

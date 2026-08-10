@@ -6,15 +6,23 @@ All notable changes to Loom are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.0.1] — 2026-08-10
+
 ### Security
 
 - Webhook destinations reject private, loopback, link-local, metadata, and
   other non-public targets by default; HTTPS and signed envelopes are required
   outside explicit development options.
-- Durable webhook outbox (`loom_webhook_outbox`): audit `Write` only enqueues
-  when PostgreSQL + `LOOM_WEBHOOK_DURABLE` are set; workers deliver with lease,
+- Durable webhook outbox (`loom_webhook_outbox`): with PostgreSQL, audit insert
+  and outbox enqueue commit in one transaction. Workers deliver with lease,
   backoff, dead-letter, and approved requeue. Delivery failure never rewrites a
   completed business effect.
+- Production refuses nondurable/inline webhooks and durable webhooks without
+  `LOOM_DATABASE_URL` (no silent degrade).
+- First-class OIDC env wiring (`LOOM_OIDC_*`): JWKS verifier on MultiVerifier
+  with bearer fallthrough and `/readyz` readiness.
+- OIDC clock-skew applied to `exp`/`nbf`; recovery never unwinds a successful
+  reconcile on late lease-renewal failure.
 - CLI: `loom webhook-worker` drains the durable outbox.
 - Policy JSON loading is strict: unknown fields, duplicate keys, invalid
   effects, oversized documents, and unsafe broad grants fail closed without
@@ -34,6 +42,7 @@ All notable changes to Loom are documented here. The format follows
   `loom.webhook.url` is set; API defaults to enqueue-only.
 - CI runs `check-sdk-versions.sh`, `check-release-manifest.sh`, and Helm
   lint/template gates.
+- Install/docs examples and SDK user-agents track `v1.0.1`.
 
 ## [1.0.0] — 2026-08-09
 

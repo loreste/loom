@@ -26,11 +26,34 @@ func NewWebhookOutbox(db *sql.DB) *WebhookOutbox {
 	return &WebhookOutbox{db: db}
 }
 
+type execContext interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
 // Enqueue inserts a pending delivery unit. Duplicate event_id is success.
 func (o *WebhookOutbox) Enqueue(ctx context.Context, record webhook.OutboxRecord) error {
 	if o == nil || o.db == nil {
 		return fmt.Errorf("%w: nil webhook outbox", core.ErrInvalidArgument)
 	}
+	return enqueueWebhookOutboxExec(ctx, o.db, record)
+}
+
+// enqueueWebhookOutboxTx inserts an outbox row on the caller's transaction so
+// audit durability and webhook enqueue commit or roll back together.
+func enqueueWebhookOutboxTx(ctx context.Context, tx *sql.Tx, ev audit.Event) error {
+	if tx == nil {
+		return fmt.Errorf("%w: nil transaction", core.ErrInvalidArgument)
+	}
+	return enqueueWebhookOutboxExec(ctx, tx, webhook.OutboxRecord{
+		EventID:     strings.TrimSpace(ev.ID),
+		AuditStream: strings.TrimSpace(ev.AuditStream),
+		Sequence:    ev.Sequence,
+		Event:       ev,
+		State:       webhook.StatePending,
+	})
+}
+
+func enqueueWebhookOutboxExec(ctx context.Context, exec execContext, record webhook.OutboxRecord) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -55,7 +78,7 @@ func (o *WebhookOutbox) Enqueue(ctx context.Context, record webhook.OutboxRecord
 		return fmt.Errorf("postgres webhook outbox: marshal: %w", err)
 	}
 	now := time.Now().UTC()
-	_, err = o.db.ExecContext(ctx, `
+	_, err = exec.ExecContext(ctx, `
 		INSERT INTO loom_webhook_outbox (
 			id, event_id, audit_stream, sequence_no, payload, state,
 			attempt, created_at, updated_at

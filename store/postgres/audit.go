@@ -20,9 +20,13 @@ const DefaultAuditStream = "default"
 // AuditSink persists audit events to PostgreSQL and coordinates one hash-chain
 // head per named stream. The row lock makes sequence assignment and previous
 // hash verification safe across Loom replicas.
+//
+// When webhookOutbox is true, each successful insert also enqueues a durable
+// webhook delivery unit in the same transaction (atomic audit+outbox).
 type AuditSink struct {
-	db       *sql.DB
-	streamID string
+	db            *sql.DB
+	streamID      string
+	webhookOutbox bool
 }
 
 const maxAuditExportEvents int64 = 10000
@@ -115,6 +119,20 @@ func (s *AuditSink) StreamID() string {
 	return s.streamID
 }
 
+// EnableWebhookOutbox attaches atomic webhook outbox enqueue to every Write.
+// Call once during bootstrap when LOOM_WEBHOOK_DURABLE is enabled with Postgres.
+// The outbox worker still delivers asynchronously; only durability is coupled.
+func (s *AuditSink) EnableWebhookOutbox() {
+	if s != nil {
+		s.webhookOutbox = true
+	}
+}
+
+// WebhookOutboxEnabled reports whether Write enqueues webhook work in-transaction.
+func (s *AuditSink) WebhookOutboxEnabled() bool {
+	return s != nil && s.webhookOutbox
+}
+
 // Write assigns a sequence and hash under the stream-head row lock, then
 // inserts the event and advances the head in one transaction.
 func (s *AuditSink) Write(ctx context.Context, ev audit.Event) error {
@@ -136,6 +154,11 @@ func (s *AuditSink) Write(ctx context.Context, ev audit.Event) error {
 	}
 	if err := insertAuditEvent(ctx, tx, ev); err != nil {
 		return err
+	}
+	if s.webhookOutbox {
+		if err := enqueueWebhookOutboxTx(ctx, tx, ev); err != nil {
+			return err
+		}
 	}
 	result, err := tx.ExecContext(ctx, `
 		UPDATE loom_audit_chain_heads

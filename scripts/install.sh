@@ -1,5 +1,10 @@
 #!/usr/bin/env sh
+# Install a verified Loom release binary (Linux/macOS).
+# Example:
+#   LOOM_REPOSITORY=loreste/loom LOOM_VERSION=v1.0.1 sh scripts/install.sh
+# Optional: LOOM_INSTALL_DIR=$HOME/.local/bin (default)
 set -eu
+
 
 repository=${LOOM_REPOSITORY:-${GITHUB_REPOSITORY:-}}
 version=${LOOM_VERSION:-}

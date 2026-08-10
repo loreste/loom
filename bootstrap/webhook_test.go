@@ -67,42 +67,35 @@ func TestPlatformWiresWebhookIntoAuditPipeline(t *testing.T) {
 	}
 }
 
-func TestPlatformDurableWebhookEnqueuesWithoutDelivery(t *testing.T) {
-	// Durable without Postgres falls back to needing an outbox. With no DB,
-	// Durable=true still builds the HTTP deliverer only if outbox is nil —
-	// buildWebhookAuditSink uses inline sink when outbox is nil.
-	// This test documents that Durable without outbox is inline, not silent drop.
-	var hits atomic.Int64
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hits.Add(1)
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer srv.Close()
-	p, err := bootstrap.NewPlatform(bootstrap.Config{
+func TestPlatformDurableWebhookWithoutPostgresFailsClosed(t *testing.T) {
+	// Durable must never silently degrade to inline delivery when no outbox exists.
+	_, err := bootstrap.NewPlatform(bootstrap.Config{
 		PolicySyncInterval:       -1,
 		DisableSeedPolicyPublish: true,
 		DemoTokens:               testtokens.Demo(),
 		Webhook: bootstrap.WebhookConfig{
-			URL: srv.URL, Secret: "s", AllowHTTP: true, AllowPrivate: true, Durable: true,
+			URL: "https://hooks.example.test/loom", Secret: "s", Durable: true,
 		},
 	})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("durable webhook without PostgreSQL outbox must fail closed")
 	}
-	t.Cleanup(func() { _ = p.Close() })
-	if p.WebhookOutbox != nil {
-		t.Fatal("expected no postgres outbox without DatabaseURL")
-	}
-	// Without outbox, sink is the HTTP deliverer (inline).
-	token := p.DemoTokens["user:alice"]
-	_ = p.Runtime.Execute(context.Background(), core.Request{
-		Operation: "document.read", OperationVersion: "1", Boundary: "dev",
-		Credentials: core.Credentials{Scheme: "bearer", Token: token},
-		Resource:    &core.ResourceRef{Type: "document", ID: "1"},
-		Input:       map[string]any{"id": "1"},
+}
+
+func TestPlatformRequireDurableRejectsInlineWebhook(t *testing.T) {
+	dir := t.TempDir()
+	_, err := bootstrap.NewPlatform(bootstrap.Config{
+		DataDir: dir, RedisURL: "redis://127.0.0.1:1",
+		JWTSecret: []byte("configured-test-secret-1234"),
+		RequireDurable: true, DisableDemoPrincipals: true,
+		PolicySyncInterval: -1, DisableSeedPolicyPublish: true,
+		Webhook: bootstrap.WebhookConfig{
+			URL: "http://127.0.0.1:1/hook", Secret: "s",
+			AllowHTTP: true, AllowPrivate: true, Durable: false,
+		},
 	})
-	if hits.Load() == 0 {
-		t.Fatal("without outbox, durable flag must not drop delivery")
+	if err == nil {
+		t.Fatal("RequireDurable must reject nondurable inline webhooks")
 	}
 }
 

@@ -75,9 +75,17 @@ func buildHTTPDeliverer(ctx context.Context, cfg WebhookConfig) (*webhook.Sink, 
 	})
 }
 
-// buildWebhookAuditSink returns the audit.Sink used on the emit path.
-// durableOutbox may be nil; then only the best-effort sink is available.
-func buildWebhookAuditSink(ctx context.Context, cfg WebhookConfig, durableOutbox webhook.Outbox) (audit.Sink, *webhook.Sink, error) {
+// buildWebhookDeliverer constructs the HTTPS deliverer used by workers (and by
+// the development inline sink). It never attaches to the audit MultiSink when
+// durable outbox mode is active — that path is atomic on the Postgres audit TX.
+func buildWebhookDeliverer(ctx context.Context, cfg WebhookConfig) (*webhook.Sink, error) {
+	return buildHTTPDeliverer(ctx, cfg)
+}
+
+// buildWebhookAuditSink returns an optional extra audit.Sink for development
+// inline delivery. When durable+outbox, it returns (nil, deliverer) so bootstrap
+// can enable atomic enqueue on the Postgres AuditSink instead of MultiSink fan-out.
+func buildWebhookAuditSink(ctx context.Context, cfg WebhookConfig, durableOutbox webhook.Outbox, requireDurable bool) (audit.Sink, *webhook.Sink, error) {
 	deliverer, err := buildHTTPDeliverer(ctx, cfg)
 	if err != nil {
 		return nil, nil, err
@@ -85,14 +93,17 @@ func buildWebhookAuditSink(ctx context.Context, cfg WebhookConfig, durableOutbox
 	if deliverer == nil {
 		return nil, nil, nil
 	}
-	if cfg.Durable && durableOutbox != nil {
-		outboxSink, err := webhook.NewOutboxSink(durableOutbox)
-		if err != nil {
-			return nil, nil, err
+	if cfg.Durable {
+		if durableOutbox == nil {
+			return nil, nil, fmt.Errorf("webhook: durable delivery requires PostgreSQL outbox (set LOOM_DATABASE_URL)")
 		}
-		return outboxSink, deliverer, nil
+		// Atomic path: no separate sink — AuditSink.EnableWebhookOutbox handles enqueue.
+		return nil, deliverer, nil
 	}
-	// Explicit nondurable path for development.
+	if requireDurable {
+		return nil, nil, fmt.Errorf("webhook: nondurable inline delivery is not permitted when RequireDurable is set")
+	}
+	// Explicit nondurable path for development only.
 	return deliverer, deliverer, nil
 }
 

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"time"
 
@@ -27,6 +28,7 @@ import (
 	"github.com/loreste/loom/guardrails"
 	"github.com/loreste/loom/idempotency"
 	"github.com/loreste/loom/identity"
+	"github.com/loreste/loom/identity/oidc"
 	"github.com/loreste/loom/persist"
 	"github.com/loreste/loom/policy"
 	"github.com/loreste/loom/quotas"
@@ -88,6 +90,8 @@ type Platform struct {
 	WebhookOutbox webhook.Outbox
 	// WebhookDeliverer is the signed HTTPS transport used by webhook workers.
 	WebhookDeliverer *webhook.Sink
+	// OIDC is the production OIDC verifier when configured (nil otherwise).
+	OIDC *oidc.Verifier
 	// jwtIssuer/jwtAudience are the configured JWT iss/aud used by MintDemoJWT.
 	jwtIssuer   string
 	jwtAudience string
@@ -150,10 +154,26 @@ type Config struct {
 	// serving traffic that denies every authenticated request.
 	ReadyChecks []func(context.Context) error
 
-	// Webhook attaches a nondurable signed audit webhook sink when URL is set.
-	// It fans out through MultiSink alongside durable sinks; it never replaces
-	// PostgreSQL/JSONL audit storage.
+	// Webhook attaches signed audit webhook delivery when URL is set.
+	// Durable mode enqueues atomically with the Postgres audit insert and
+	// never uses inline HTTP on the request path.
 	Webhook WebhookConfig
+
+	// OIDC configures the production OIDC/JWKS verifier when Issuer is set.
+	// The verifier is registered as scheme "oidc" and as a bearer fallthrough
+	// after the HMAC JWT verifier. ReadyCheck is registered automatically.
+	OIDC OIDCConfig
+}
+
+// OIDCConfig is the bootstrap surface for identity/oidc.
+type OIDCConfig struct {
+	Issuer          string
+	Audience        string
+	Algorithms      []string
+	ClaimBoundary   string
+	RequireBoundary bool
+	// HTTPClient is injectable for tests (self-signed discovery servers).
+	HTTPClient *http.Client
 }
 
 // NewPlatform builds deny-by-default stack with demo principals and domain ops.
@@ -199,11 +219,41 @@ func NewPlatform(cfg Config) (*Platform, error) {
 		return nil, err
 	}
 	mtls := identity.NewMTLSVerifier()
-	multi := identity.NewMultiVerifier(map[string]identity.Verifier{
+	schemes := map[string]identity.Verifier{
 		"bearer": mem,
 		"jwt":    jwt,
 		"mtls":   mtls,
-	})
+	}
+	var oidcVerifier *oidc.Verifier
+	if cfg.OIDC.Issuer != "" {
+		algs := cfg.OIDC.Algorithms
+		if len(algs) == 0 {
+			algs = []string{"RS256"}
+		}
+		boundaryClaim := cfg.OIDC.ClaimBoundary
+		if boundaryClaim == "" {
+			boundaryClaim = "tenant_id"
+		}
+		claimAttrs := map[string]string{}
+		for k, v := range cfg.JWTClaimAttributes {
+			claimAttrs[k] = v
+		}
+		ov, err := oidc.NewVerifier(context.Background(), oidc.Config{
+			Issuer:            cfg.OIDC.Issuer,
+			Audience:          cfg.OIDC.Audience,
+			AllowedAlgorithms: algs,
+			ClaimBoundary:     boundaryClaim,
+			RequireBoundary:   cfg.OIDC.RequireBoundary,
+			ClaimAttributes:   claimAttrs,
+			HTTPClient:        cfg.OIDC.HTTPClient,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("oidc: %w", err)
+		}
+		oidcVerifier = ov
+		schemes["oidc"] = ov
+	}
+	multi := identity.NewMultiVerifier(schemes)
 	del := identity.NewMemoryDelegation()
 	bnd := boundary.NewMemoryChecker()
 	pol := policy.NewMemoryEngine()
@@ -221,11 +271,15 @@ func NewPlatform(cfg Config) (*Platform, error) {
 		rdb            *redis.Client
 		readyFns       []func(context.Context) error
 		extraSink      audit.Sink
+		pgAudit        *postgres.AuditSink
 		limiter        quotas.Limiter
 		policySrc      policy.Source
 		pgBundle       *postgres.Bundle
 		auditFile      *os.File
 	)
+	if oidcVerifier != nil {
+		readyFns = append(readyFns, oidcVerifier.ReadyCheck())
+	}
 
 	// Quotas: Redis when configured, else memory. Shared Config for limits.
 	if cfg.RedisURL != "" {
@@ -265,6 +319,7 @@ func NewPlatform(cfg Config) (*Platform, error) {
 		apr = bundle.Approvals
 		idem = bundle.Idempotency
 		executionStore = bundle.ExecutionStatus
+		pgAudit = bundle.Audit
 		extraSink = bundle.Audit
 		policySrc = bundle.Policy
 		readyFns = append(readyFns, func(ctx context.Context) error {
@@ -338,19 +393,19 @@ func NewPlatform(cfg Config) (*Platform, error) {
 		if pgBundle != nil && pgBundle.WebhookOutbox != nil {
 			webhookOutbox = pgBundle.WebhookOutbox
 		}
-		// Default durable when a Postgres outbox exists unless explicitly disabled.
 		hookCfg := cfg.Webhook
-		if webhookOutbox != nil && !hookCfg.Durable {
-			// Config.PlatformConfig sets Durable when LOOM_DATABASE_URL is set.
-			// Direct bootstrap callers can leave Durable false for inline demos.
-		}
-		sink, deliverer, err := buildWebhookAuditSink(context.Background(), hookCfg, webhookOutbox)
+		sink, deliverer, err := buildWebhookAuditSink(context.Background(), hookCfg, webhookOutbox, cfg.RequireDurable)
 		if err != nil {
 			if auditFile != nil {
 				_ = auditFile.Close()
 			}
 			_ = closeAll(db, rdb)
 			return nil, fmt.Errorf("webhook: %w", err)
+		}
+		// Durable mode: enqueue inside the Postgres audit transaction (atomic).
+		// Do not also MultiSink a separate outbox sink (would double-enqueue).
+		if hookCfg.Durable && pgAudit != nil {
+			pgAudit.EnableWebhookOutbox()
 		}
 		if sink != nil {
 			sinks = append(sinks, sink)
@@ -471,6 +526,7 @@ func NewPlatform(cfg Config) (*Platform, error) {
 		auditFile:        auditFile,
 		WebhookOutbox:    webhookOutbox,
 		WebhookDeliverer: webhookDeliverer,
+		OIDC:             oidcVerifier,
 	}
 	// Policy source: explicit file path overrides; else postgres when available;
 	// else DataDir/policy.json when data dir set.

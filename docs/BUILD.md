@@ -52,7 +52,7 @@ against the release's `SHA256SUMS` file:
 
 ```bash
 LOOM_REPOSITORY=loreste/loom \
-LOOM_VERSION=v1.0.0 \
+LOOM_VERSION=v1.0.1 \
   sh scripts/install.sh
 ```
 

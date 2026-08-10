@@ -2,7 +2,7 @@
 # Distribution name on PyPI. Import package remains `loom`.
 # Never publish as `loom-sdk` — that name is owned by an unrelated project.
 name = "loreste-loom"
-version = "1.0.0"
+version = "1.0.1"
 description = "Loom Universal Runtime Python SDK (HTTP client)"
 readme = "README.md"
 requires-python = ">=3.10"
