@@ -101,6 +101,12 @@ type Metrics struct {
 	recoveryAttempts     int64
 	recoveryRenewals     int64
 	recoveryDeadLetters  int64
+	webhookDepth         int64
+	webhookOldestAge     time.Duration
+	webhookAttempts      int64
+	webhookDeliveries    int64
+	webhookFailures      int64
+	webhookDeadLetters   int64
 	byStage              map[string]int64
 	byReason             map[string]int64
 }
@@ -230,6 +236,36 @@ func (m *Metrics) ObserveRecoveryProgress(attempts, renewals, deadLetters int64)
 	m.mu.Unlock()
 }
 
+// ObserveWebhookQueue records durable webhook outbox gauges.
+func (m *Metrics) ObserveWebhookQueue(depth int64, oldestAge time.Duration) {
+	if m == nil {
+		return
+	}
+	if depth < 0 {
+		depth = 0
+	}
+	if oldestAge < 0 {
+		oldestAge = 0
+	}
+	m.mu.Lock()
+	m.webhookDepth = depth
+	m.webhookOldestAge = oldestAge
+	m.mu.Unlock()
+}
+
+// ObserveWebhookProgress records webhook worker counters without high-cardinality labels.
+func (m *Metrics) ObserveWebhookProgress(attempts, deliveries, failures, deadLetters int64) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.webhookAttempts += maxNonNegative(attempts)
+	m.webhookDeliveries += maxNonNegative(deliveries)
+	m.webhookFailures += maxNonNegative(failures)
+	m.webhookDeadLetters += maxNonNegative(deadLetters)
+	m.mu.Unlock()
+}
+
 func maxNonNegative(value int64) int64 {
 	if value < 0 {
 		return 0
@@ -264,6 +300,12 @@ func (m *Metrics) Snapshot() map[string]any {
 		"recovery_attempts":              m.recoveryAttempts,
 		"recovery_renewals":              m.recoveryRenewals,
 		"recovery_dead_letters":          m.recoveryDeadLetters,
+		"webhook_depth":                  m.webhookDepth,
+		"webhook_oldest_age_seconds":     m.webhookOldestAge.Seconds(),
+		"webhook_attempts":               m.webhookAttempts,
+		"webhook_deliveries":             m.webhookDeliveries,
+		"webhook_failures":               m.webhookFailures,
+		"webhook_dead_letters":           m.webhookDeadLetters,
 	}
 }
 

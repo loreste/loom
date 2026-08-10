@@ -277,15 +277,18 @@ func (w *Worker) ProcessOne(ctx context.Context) (ProcessResult, error) {
 		<-renewDone
 		return w.fail(ctx, lease, result, "reconciliation_failed", "execution reconciliation failed", err)
 	}
+	// Durable state is reconciled. Lease renewal or release failures must not
+	// schedule retries or dead-letter the record: the next worker reclaims an
+	// expired lease, observes StateReconciled, and releases completed.
+	result.Reconciled = true
 	cancel()
 	<-renewDone
-	if err := <-renewErr; err != nil {
-		return w.fail(ctx, lease, result, "lease_renewal_failed", "recovery lease renewal failed", err)
-	}
+	// Drain heartbeat outcome; a late renewal error is irrelevant after a
+	// successful reconciliation and must never reverse durable progress.
+	_ = <-renewErr
 	if err := w.queue.ReleaseRecovery(ctx, lease.Record.ExecutionID, lease.LeaseID, true); err != nil {
 		return result, err
 	}
-	result.Reconciled = true
 	return result, nil
 }
 
@@ -354,10 +357,12 @@ func (w *Worker) fail(ctx context.Context, lease execution.RecoveryLease, result
 	}
 
 	var escalationErr error
-	if w.escalator != nil {
+	// Deduplicate against RecoveryEscalated so repeated claim/release cycles
+	// without a durable scheduler cannot page operators on every poll.
+	if w.escalator != nil && !lease.Record.RecoveryEscalated {
 		escalationErr = w.escalator.Escalate(ctx, lease.Record, cause)
 		result.Escalated = escalationErr == nil
-	} else {
+	} else if w.escalator == nil {
 		w.logger.Printf("loom recovery worker: execution %s remains uncertain: %s", lease.Record.ExecutionID, summary)
 	}
 	if err := w.queue.ReleaseRecovery(ctx, lease.Record.ExecutionID, lease.LeaseID, false); err != nil {

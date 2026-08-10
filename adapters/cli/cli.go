@@ -24,6 +24,7 @@ import (
 	"github.com/loreste/loom/config"
 	"github.com/loreste/loom/core"
 	"github.com/loreste/loom/runtime"
+	"github.com/loreste/loom/tenancy"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
@@ -72,6 +73,7 @@ func (a *Adapter) Run(ctx context.Context, args []string) int {
   loom mint-jwt --sub=user:alice --boundary=dev --caps=document.read   # requires LOOM_DEV_TOOLS=1
   loom approve --token=appr-1 --principal=user:bob --op=payment.capture --boundary=dev  # requires LOOM_DEV_TOOLS=1
   loom recovery-worker --verifier-url=https://provider.example/recovery
+  loom webhook-worker
   loom recovery list --url=https://loom.example --token=$LOOM_TOKEN --boundary=ops
   loom recovery requeue --execution-id=<id> --url=https://loom.example --token=$LOOM_TOKEN --boundary=ops --idempotency-key=<key> --approval-token=<token>
   loom recovery dead-letter --execution-id=<id> --url=https://loom.example --token=$LOOM_TOKEN --boundary=ops --idempotency-key=<key> --approval-token=<token>
@@ -111,6 +113,8 @@ func (a *Adapter) Run(ctx context.Context, args []string) int {
 		return a.runApprove(args[1:])
 	case "recovery-worker":
 		return a.runRecoveryWorker(ctx, args[1:])
+	case "webhook-worker":
+		return a.runWebhookWorker(ctx, args[1:])
 	case "recovery":
 		if len(args) > 1 {
 			command := strings.ReplaceAll(args[1], "-", "_")
@@ -305,20 +309,40 @@ func (a *Adapter) runServe(ctx context.Context, args []string) int {
 	rt := a.RT
 	var readyFn func(context.Context) error
 	envCfg := config.Load()
+	// Flags override env for the store locations the serve command exposes.
+	if dataDir != "" {
+		envCfg.DataDir = dataDir
+	}
+	if dbURL != "" {
+		envCfg.DatabaseURL = dbURL
+	}
+	if redisURL != "" {
+		envCfg.RedisURL = redisURL
+	}
 	if err := enforceServeSecurity(envCfg); err != nil {
 		fmt.Fprintln(a.errW(), "security:", err)
 		return 2
 	}
-	if a.PlatformFactory != nil && (dataDir != "" || dbURL != "" || redisURL != "") {
-		fc := true
-		p, err := a.PlatformFactory(bootstrap.Config{
-			DataDir:               dataDir,
-			DatabaseURL:           dbURL,
-			RedisURL:              redisURL,
-			FailClosedQuotas:      &fc,
-			RequireDurable:        envCfg.RequireDurable,
-			DisableDemoPrincipals: envCfg.DisableDemoPrincipals,
-		})
+	if a.PlatformFactory != nil && (envCfg.DataDir != "" || envCfg.DatabaseURL != "" || envCfg.RedisURL != "" || envCfg.WebhookConfigured() || envCfg.PolicyPath != "") {
+		bcfg := envCfg.PlatformConfig()
+		// Preserve process demo-token env when serve rebuilds the platform so
+		// LOOM_DEMO_TOKEN_* remains effective for local durable runs.
+		bcfg.DemoTokens = map[string]string{
+			"user:alice":      os.Getenv("LOOM_DEMO_TOKEN_ALICE"),
+			"user:bob":        os.Getenv("LOOM_DEMO_TOKEN_BOB"),
+			"user:ops":        os.Getenv("LOOM_DEMO_TOKEN_OPS"),
+			"user:approver":   os.Getenv("LOOM_DEMO_TOKEN_APPROVER"),
+			"agent:assistant": os.Getenv("LOOM_DEMO_TOKEN_AGENT"),
+		}
+		if claim := strings.TrimSpace(envCfg.TenantClaim); claim != "" {
+			resolver, err := tenancy.NewResolver("tenant_id")
+			if err != nil {
+				fmt.Fprintln(a.errW(), "tenancy:", err)
+				return 2
+			}
+			bcfg.TenantResolver = resolver
+		}
+		p, err := a.PlatformFactory(bcfg)
 		if err != nil {
 			fmt.Fprintln(a.errW(), "bootstrap:", err)
 			return 2
@@ -326,13 +350,19 @@ func (a *Adapter) runServe(ctx context.Context, args []string) int {
 		a.Platform = p
 		rt = p.Runtime
 		readyFn = p.Ready
-		if dbURL != "" {
+		if envCfg.DatabaseURL != "" {
 			fmt.Fprintln(a.errW(), "loom storage: postgres (approvals/idempotency/audit)")
-		} else if dataDir != "" {
-			fmt.Fprintf(a.errW(), "loom data dir: %s (approvals/idempotency/audit persisted)\n", dataDir)
+		} else if envCfg.DataDir != "" {
+			fmt.Fprintf(a.errW(), "loom data dir: %s (approvals/idempotency/audit persisted)\n", envCfg.DataDir)
 		}
-		if redisURL != "" {
+		if envCfg.RedisURL != "" {
 			fmt.Fprintln(a.errW(), "loom quotas: redis (fail-closed)")
+		}
+		if envCfg.PolicyPath != "" {
+			fmt.Fprintln(a.errW(), "loom policy: file source enabled")
+		}
+		if envCfg.WebhookConfigured() {
+			fmt.Fprintln(a.errW(), "loom audit webhook: enabled (nondurable best-effort)")
 		}
 	} else if a.Platform == nil && rt == nil {
 		fmt.Fprintln(a.errW(), "loom: runtime not configured")

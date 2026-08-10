@@ -104,11 +104,12 @@ policy and resource access, and call only through `app.Call`. See
 
 ## Install the SDKs
 
-The Go SDK is part of the Go module. The Python, TypeScript, and Rust SDK
-manifests are aligned with the release version, but registry publication
-depends on trusted-publisher configuration. Use registry commands only for a
-release confirmed as published in [`RELEASES.md`](RELEASES.md). Until then,
-install directly from the repository for local development:
+The Go SDK is part of the Go module and is available via git tags. Python,
+TypeScript, and Rust SDK manifests are version-aligned, but as of v1.0.0 they
+are **not** published to public registries. Install from the repository until
+[`RELEASES.md`](RELEASES.md) and [`release-manifest.json`](../release-manifest.json)
+mark a coordinate `published: true`. The Python distribution name is
+`loreste-loom` (import `loom`); never use the unrelated PyPI name `loom-sdk`.
 
 Python:
 

@@ -151,8 +151,10 @@ jobs:
           SDK_VERSION: ${{ steps.version.outputs.value }}
         run: |
           for attempt in $(seq 1 12); do
-            if python -m pip install --no-cache-dir "loom-sdk==${SDK_VERSION}"; then
+            if python -m pip install --no-cache-dir "loreste-loom==${SDK_VERSION}"; then
               python -c 'import loom; print(loom.__file__)'
+              # Refuse the conflicting unrelated PyPI name.
+              python -c 'import importlib.metadata as m; assert m.metadata("loreste-loom")["Name"].lower()=="loreste-loom"'
               break
             fi
             [ "$attempt" -eq 12 ] && exit 1

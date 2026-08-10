@@ -37,23 +37,24 @@ type Engine interface {
 }
 
 // Rule is an explicit allow rule. No matching rule ⇒ deny.
+// JSON tags match the on-disk policy file schema used by ParseJSON/ParseDocument.
 type Rule struct {
 	// Principal exact match; empty = any (still need other matchers).
-	Principal core.PrincipalID
+	Principal core.PrincipalID `json:"principal,omitempty"`
 	// Boundary exact; empty = any boundary (dangerous; prefer explicit).
-	Boundary core.BoundaryID
+	Boundary core.BoundaryID `json:"boundary,omitempty"`
 	// Operation exact name or "*".
-	Operation string
+	Operation string `json:"operation"`
 	// OperationVersion exact version; empty applies to every registered version.
-	OperationVersion string
+	OperationVersion string `json:"operation_version,omitempty"`
 	// Permissions: identity must hold ALL of these (AND). Empty = rely on Operation match only.
-	Permissions []string
+	Permissions []string `json:"permissions,omitempty"`
 	// EffectAllow lists effects this rule covers; empty = no effect restriction.
-	EffectAllow []core.Effect
+	EffectAllow []core.Effect `json:"effect_allow,omitempty"`
 	// Deny overrides: if true, matching this rule forces deny (explicit deny wins).
-	Deny bool
+	Deny bool `json:"deny,omitempty"`
 	// Priority: higher wins among matches; explicit Deny always beats Allow at same priority.
-	Priority int
+	Priority int `json:"priority,omitempty"`
 }
 
 // MemoryEngine is an explicit-grant policy store with deny-overrides.

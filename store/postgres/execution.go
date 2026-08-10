@@ -481,7 +481,8 @@ func (s *ExecutionStore) ScheduleRecovery(ctx context.Context, id, leaseID strin
 		    updated_at = NOW(), revision = revision + 1
 		WHERE execution_id = $1 AND recovery_lease_id = $2
 		  AND recovery_queued = TRUE
-	`, id, leaseID, next.UTC(), category, summary)
+		  AND state = $6
+	`, id, leaseID, next.UTC(), category, summary, execution.StateExecutedUnconfirmed)
 	if err != nil {
 		return execution.Record{}, err
 	}
@@ -508,6 +509,8 @@ func (s *ExecutionStore) DeadLetterRecovery(ctx context.Context, id, leaseID, ca
 	if err := ctx.Err(); err != nil {
 		return execution.Record{}, err
 	}
+	// State guard is mandatory: a reconciled record must never be rewritten
+	// into operator_review by a late worker failure (renewal/release race).
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE loom_executions
 		SET state = $3, recovery_queued = FALSE, recovery_escalated = TRUE,
@@ -516,7 +519,8 @@ func (s *ExecutionStore) DeadLetterRecovery(ctx context.Context, id, leaseID, ca
 		    recovery_lease_until = NULL, next_attempt_at = NULL,
 		    updated_at = NOW(), revision = revision + 1
 		WHERE execution_id = $1 AND recovery_lease_id = $2
-	`, id, leaseID, execution.StateOperatorReview, category, summary)
+		  AND state = $6
+	`, id, leaseID, execution.StateOperatorReview, category, summary, execution.StateExecutedUnconfirmed)
 	if err != nil {
 		return execution.Record{}, err
 	}

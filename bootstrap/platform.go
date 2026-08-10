@@ -34,6 +34,7 @@ import (
 	"github.com/loreste/loom/risk"
 	"github.com/loreste/loom/runtime"
 	"github.com/loreste/loom/store/postgres"
+	"github.com/loreste/loom/webhook"
 )
 
 // Platform is a fully wired Loom deployment.
@@ -83,12 +84,18 @@ type Platform struct {
 	PolicySource policy.Source
 	// PolicySyncer background applier; Stopped on Close.
 	PolicySyncer *policy.Syncer
+	// WebhookOutbox is set when durable webhook delivery is enabled with Postgres.
+	WebhookOutbox webhook.Outbox
+	// WebhookDeliverer is the signed HTTPS transport used by webhook workers.
+	WebhookDeliverer *webhook.Sink
 	// jwtIssuer/jwtAudience are the configured JWT iss/aud used by MintDemoJWT.
 	jwtIssuer   string
 	jwtAudience string
 	jwtKeyID    string
 	// auditFile is the JSONL audit sink handle (when AuditJSONL/DataDir set); closed by Close.
 	auditFile *os.File
+	// webhookStop cancels an in-process webhook worker started with RunWorker.
+	webhookStop context.CancelFunc
 }
 
 // Config for platform bootstrap.
@@ -142,6 +149,11 @@ type Config struct {
 	// process that has never reached its issuer fails /readyz instead of
 	// serving traffic that denies every authenticated request.
 	ReadyChecks []func(context.Context) error
+
+	// Webhook attaches a nondurable signed audit webhook sink when URL is set.
+	// It fans out through MultiSink alongside durable sinks; it never replaces
+	// PostgreSQL/JSONL audit storage.
+	Webhook WebhookConfig
 }
 
 // NewPlatform builds deny-by-default stack with demo principals and domain ops.
@@ -318,9 +330,45 @@ func NewPlatform(cfg Config) (*Platform, error) {
 		auditFile = f
 		sinks = append(sinks, audit.NewDurableWriterSink(f))
 	}
+	var (
+		webhookOutbox    webhook.Outbox
+		webhookDeliverer *webhook.Sink
+	)
+	if cfg.Webhook.enabled() {
+		if pgBundle != nil && pgBundle.WebhookOutbox != nil {
+			webhookOutbox = pgBundle.WebhookOutbox
+		}
+		// Default durable when a Postgres outbox exists unless explicitly disabled.
+		hookCfg := cfg.Webhook
+		if webhookOutbox != nil && !hookCfg.Durable {
+			// Config.PlatformConfig sets Durable when LOOM_DATABASE_URL is set.
+			// Direct bootstrap callers can leave Durable false for inline demos.
+		}
+		sink, deliverer, err := buildWebhookAuditSink(context.Background(), hookCfg, webhookOutbox)
+		if err != nil {
+			if auditFile != nil {
+				_ = auditFile.Close()
+			}
+			_ = closeAll(db, rdb)
+			return nil, fmt.Errorf("webhook: %w", err)
+		}
+		if sink != nil {
+			sinks = append(sinks, sink)
+		}
+		webhookDeliverer = deliverer
+	}
+	if len(sinks) == 0 {
+		// Production durable mode without any sink is refuse-startup: audit is
+		// required for governed decisions.
+		if auditFile != nil {
+			_ = auditFile.Close()
+		}
+		_ = closeAll(db, rdb)
+		return nil, fmt.Errorf("%w: no audit sink configured (enable postgres audit, LOOM_AUDIT_JSONL, or disable RequireDurable)", core.ErrInvalidArgument)
+	}
 	var auditLogger *audit.Logger
 	if len(sinks) == 1 {
-		auditLogger = audit.NewLogger(memSink)
+		auditLogger = audit.NewLogger(sinks[0])
 	} else {
 		auditLogger = audit.NewLogger(&audit.MultiSink{Sinks: sinks})
 	}
@@ -417,10 +465,12 @@ func NewPlatform(cfg Config) (*Platform, error) {
 		Redis:           rdb,
 		Ready:           ready,
 		Metrics:         metrics,
-		jwtIssuer:       cfg.JWTIssuer,
-		jwtAudience:     cfg.JWTAudience,
-		jwtKeyID:        cfg.JWTKeyID,
-		auditFile:       auditFile,
+		jwtIssuer:        cfg.JWTIssuer,
+		jwtAudience:      cfg.JWTAudience,
+		jwtKeyID:         cfg.JWTKeyID,
+		auditFile:        auditFile,
+		WebhookOutbox:    webhookOutbox,
+		WebhookDeliverer: webhookDeliverer,
 	}
 	// Policy source: explicit file path overrides; else postgres when available;
 	// else DataDir/policy.json when data dir set.
@@ -436,6 +486,16 @@ func NewPlatform(cfg Config) (*Platform, error) {
 	if err := p.registerDomains(); err != nil {
 		_ = p.Close()
 		return nil, err
+	}
+	if cfg.Webhook.RunWorker && p.WebhookOutbox != nil && p.WebhookDeliverer != nil {
+		worker, err := newWebhookWorker(cfg.Webhook, p.WebhookOutbox, p.WebhookDeliverer, metrics, log.Default())
+		if err != nil {
+			_ = p.Close()
+			return nil, fmt.Errorf("webhook worker: %w", err)
+		}
+		workerCtx, stop := context.WithCancel(context.Background())
+		p.webhookStop = stop
+		go func() { _ = worker.Run(workerCtx) }()
 	}
 	// Register policy admin ops when source exists
 	if policySrc != nil {
@@ -816,6 +876,10 @@ func (p *Platform) RegisterMTLSPrincipal(fp string, id core.PrincipalID, boundar
 func (p *Platform) Close() error {
 	if p == nil {
 		return nil
+	}
+	if p.webhookStop != nil {
+		p.webhookStop()
+		p.webhookStop = nil
 	}
 	if p.PolicySyncer != nil {
 		p.PolicySyncer.Stop()

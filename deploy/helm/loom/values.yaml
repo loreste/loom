@@ -22,6 +22,18 @@ recoveryWorker:
   backoffMax: 5m
   maxAttempts: "8"
 
+# Separate durable webhook delivery worker. Enabled only when loom.webhook.url
+# is set; the API enqueues to loom_webhook_outbox and does not deliver inline.
+webhookWorker:
+  enabled: true
+  replicas: 1
+  resources: {}
+  poll: 2s
+  lease: 30s
+  backoffBase: 1s
+  backoffMax: 5m
+  maxAttempts: "8"
+
 secrets:
   existingSecret: ""
   databaseURLKey: database-url
@@ -30,6 +42,7 @@ secrets:
   jwtIssuerKey: jwt-issuer
   jwtAudienceKey: jwt-audience
   recoveryVerifierTokenKey: recovery-verifier-token
+  webhookSecretKey: webhook-secret
 
 loom:
   tenantClaim: tenant_id
@@ -37,6 +50,16 @@ loom:
   policySyncInterval: 5s
   trustedTLSProxy: true
   httpRateLimitPerMinute: "0"
+  webhook:
+    # Optional durable audit webhook. Leave url empty to disable.
+    # When set, the API enqueues only; webhookWorker delivers.
+    url: ""
+    keyId: ""
+    allowHosts: ""
+    failClosed: false
+    timeout: 5s
+    durable: true
+    runWorkerInAPI: false
 
 serviceAccount:
   create: true

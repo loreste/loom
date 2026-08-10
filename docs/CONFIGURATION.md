@@ -62,6 +62,45 @@ explicitly. See [`IDENTITY.md`](IDENTITY.md) for the production requirements.
 
 Policy reload failures fail closed and should be monitored.
 
+## Audit webhook (nondurable)
+
+Optional best-effort delivery of audit events to an HTTPS endpoint. This sink
+does **not** replace durable audit storage. Prefer PostgreSQL audit (or JSONL)
+plus a durable outbox for crash-safe delivery; the webhook fan-out is additional
+notification only.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `LOOM_WEBHOOK_URL` | empty | HTTPS destination. Empty disables the webhook sink. |
+| `LOOM_WEBHOOK_SECRET` | empty | HMAC signing secret. Required in production when URL is set. |
+| `LOOM_WEBHOOK_KEY_ID` | empty | Optional key id for secret rotation. |
+| `LOOM_WEBHOOK_ALLOW_HOSTS` | empty | Comma-separated exact host allowlist. |
+| `LOOM_WEBHOOK_FAIL_CLOSED` | `false` | Propagate delivery errors into the audit pipeline. |
+| `LOOM_WEBHOOK_ALLOW_HTTP` | `false` | Development only; rejected in production-like `LOOM_ENV`. |
+| `LOOM_WEBHOOK_ALLOW_PRIVATE` | `false` | Development/tests only; rejected in production-like `LOOM_ENV`. |
+| `LOOM_WEBHOOK_TIMEOUT` | `5s` | Per-delivery HTTP timeout. |
+| `LOOM_WEBHOOK_DURABLE` | `true` when `LOOM_DATABASE_URL` is set, else `false` | Enqueue to the durable outbox instead of inline HTTP. |
+| `LOOM_WEBHOOK_RUN_WORKER` | `false` | Start an in-process delivery worker with the API (prefer a separate `loom webhook-worker`). |
+| `LOOM_WEBHOOK_OWNER` | `loom-webhook-worker` | Worker lease owner name. |
+| `LOOM_WEBHOOK_LEASE` | `30s` | Delivery lease duration. |
+| `LOOM_WEBHOOK_POLL` | `2s` | Outbox poll interval. |
+| `LOOM_WEBHOOK_BACKOFF_BASE` | `1s` | Initial retry backoff. |
+| `LOOM_WEBHOOK_BACKOFF_MAX` | `5m` | Maximum retry backoff. |
+| `LOOM_WEBHOOK_MAX_ATTEMPTS` | `8` | Attempts before dead-letter. |
+
+Private, loopback, link-local, metadata, and similar destinations are rejected
+unless `LOOM_WEBHOOK_ALLOW_PRIVATE=true`. Redirects are disabled by default.
+Signed envelopes include event id, timestamp, content digest, and `v1` HMAC.
+
+### Durable outbox
+
+When `LOOM_WEBHOOK_DURABLE=true` and PostgreSQL is configured, audit `Write`
+only inserts into `loom_webhook_outbox`. A worker (`loom webhook-worker` or
+`LOOM_WEBHOOK_RUN_WORKER=true`) claims leases, delivers signed HTTPS requests,
+applies bounded exponential backoff, and dead-letters exhausted attempts.
+Duplicate `event_id` enqueues are no-ops, so MultiSink retries are safe.
+Delivery failure never rewrites a completed business effect as unexecuted.
+
 ## Compliance audit configuration
 
 `LOOM_AUDIT_JSONL` enables a JSON Lines audit sink for single-node deployments or log shippers. The path must be owned by the service account, have restrictive permissions, and be included in the backup and retention plan. A plain file is not an immutable archive.

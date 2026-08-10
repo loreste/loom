@@ -34,6 +34,14 @@ RLS. Keep break-glass access separate, approved, and audited.
 
 ## Identity and cryptographic keys
 
+Audit webhooks, when enabled via `LOOM_WEBHOOK_URL`, attach through bootstrap.
+With PostgreSQL and `LOOM_WEBHOOK_DURABLE=true` (default when a database URL is
+set), `Write` only enqueues to `loom_webhook_outbox`; a worker delivers with
+retry and dead-letter. Without a durable outbox the sink is best-effort and
+inline. Webhooks require HTTPS and a signing secret in production, reject
+private/metadata destinations by default, and never replace PostgreSQL or JSONL
+durable audit storage. See [`CONFIGURATION.md`](CONFIGURATION.md).
+
 `identity/oidc` performs configured OIDC discovery, bounded JWKS retrieval,
 issuer/audience validation, algorithm allowlisting, key rotation, and explicit
 claim mapping. It is not an identity provider or revocation service. Operators

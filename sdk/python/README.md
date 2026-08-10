@@ -3,14 +3,19 @@
 This is a thin HTTP client for the Loom runtime. Authorization remains
 server-side; the SDK cannot grant permissions.
 
-The 0.2.1 source is version-aligned with Loom, but its PyPI publication is
-pending registry trusted-publisher configuration. Install it from this
-checkout for now:
+- **Distribution name (PyPI):** `loreste-loom`
+- **Import package:** `loom`
+- **Do not use** PyPI `loom-sdk` — that name is owned by an unrelated project.
+
+Registry publication is pending trusted-publisher configuration. Install from
+this checkout until [`docs/RELEASES.md`](../../docs/RELEASES.md) marks the
+package published:
 
 ```bash
 python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install ./sdk/python
+# future public install: python -m pip install loreste-loom
 ```
 
 Start a development Loom HTTP adapter and set `LOOM_TOKEN` to the corresponding

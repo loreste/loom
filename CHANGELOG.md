@@ -6,13 +6,42 @@ All notable changes to Loom are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- Webhook destinations reject private, loopback, link-local, metadata, and
+  other non-public targets by default; HTTPS and signed envelopes are required
+  outside explicit development options.
+- Durable webhook outbox (`loom_webhook_outbox`): audit `Write` only enqueues
+  when PostgreSQL + `LOOM_WEBHOOK_DURABLE` are set; workers deliver with lease,
+  backoff, dead-letter, and approved requeue. Delivery failure never rewrites a
+  completed business effect.
+- CLI: `loom webhook-worker` drains the durable outbox.
+- Policy JSON loading is strict: unknown fields, duplicate keys, invalid
+  effects, oversized documents, and unsafe broad grants fail closed without
+  replacing the active policy.
+
+### Changed
+
+- Python distribution name is `loreste-loom` (import package remains `loom`).
+  The PyPI name `loom-sdk` is owned by an unrelated project and must never be
+  targeted.
+- Public documentation states that npm/PyPI/crates SDK publication is pending
+  until unauthenticated public installs succeed.
+- CLI documentation and help list only implemented commands:
+  `loom recovery list|requeue|dead-letter` (no recovery `approve`/`reject`;
+  no `loom operator` group).
+- Helm chart deploys a separate durable webhook worker when
+  `loom.webhook.url` is set; API defaults to enqueue-only.
+- CI runs `check-sdk-versions.sh`, `check-release-manifest.sh`, and Helm
+  lint/template gates.
+
 ## [1.0.0] — 2026-08-09
 
 ### Added
 
-- **Webhook notifications** (`webhook/`): `audit.Sink` that delivers events to
-  HTTP endpoints with HMAC-SHA256 signing, configurable filtering, and
-  fail-open or fail-closed delivery modes.
+- **Webhook notifications** (`webhook/`): best-effort `audit.Sink` for HTTP
+  delivery with optional HMAC signing and filtering. Production deployments
+  must not treat this as a durable audit store.
 - **Pipeline tracing** (`runtime.Tracer`): per-stage span events through the
   execution pipeline. The `observability/otel` bridge implements both
   `Observer` and `Tracer`; zero overhead when nil.
@@ -20,10 +49,11 @@ All notable changes to Loom are documented here. The format follows
   loader for policy rules with atomic replacement and round-trip serialization.
 - CLI policy management: `loom policy lint`, `test`, `diff`, `explain`,
   `simulate` for operator-safe policy inspection and validation.
-- Recovery administration: `loom recovery list`, `approve`, `reject`,
-  `dead-letter` with authenticated access control.
-- Operator CLI: `loom operator status`, `metrics`, `config` for operational
-  visibility.
+- Recovery administration: `loom recovery list`, `requeue`, `dead-letter`
+  with authenticated access control through governed operations.
+- Execution inspection: `loom execution get`.
+- Audit offline tooling: `loom audit head|verify|export|checkpoint|
+  verify-checkpoint|rotate`.
 - Conformance fixtures (`conformance/fixtures/`) for cross-SDK protocol
   validation.
 - Threat model documentation (`docs/THREAT-MODEL.md`).
@@ -41,12 +71,12 @@ All notable changes to Loom are documented here. The format follows
   recovery worker; previously exported but never populated.
 - `loom_execute_duration_seconds` is now a full histogram with `_sum`,
   `_count`, and `le` buckets.
-- Release documentation updated to reflect trusted-publisher SDK publication.
 
 ### Fixed
 
 - npm SDK publication auth failure caused by the workflow unsetting
-  `NODE_AUTH_TOKEN` after upgrading npm globally.
+  `NODE_AUTH_TOKEN` after upgrading npm globally. SDK registry publication
+  remained blocked after v1.0.0 and is not claimed as complete.
 
 ## [0.2.1] — 2026-08-07
 

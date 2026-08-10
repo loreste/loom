@@ -1,10 +1,11 @@
 # Kubernetes deployment
 
 The repository includes a Helm chart at
-[`deploy/helm/loom`](../deploy/helm/loom). It deploys the API and the official
-recovery worker as separate workloads, runs the idempotent PostgreSQL migration
-hook, configures health/readiness probes, uses a non-root read-only filesystem,
-creates no RBAC permissions, and includes a PDB and NetworkPolicy.
+[`deploy/helm/loom`](../deploy/helm/loom). It deploys the API, the official
+recovery worker, and (when configured) a durable webhook delivery worker as
+separate workloads. It runs the idempotent PostgreSQL migration hook, configures
+health/readiness probes, uses a non-root read-only filesystem, creates no RBAC
+permissions, and includes a PDB and NetworkPolicy.
 
 The chart deliberately does not create a database, Redis instance, or runtime
 Secret. Supply an externally managed Secret and reference it in values:
@@ -21,8 +22,29 @@ The Secret must contain keys matching `secrets.*Key` in `values.yaml`:
 - `database-url` — PostgreSQL URL for shared durable state;
 - `redis-url` — Redis URL for shared fail-closed quotas;
 - `jwt-secret` — application JWT signing secret;
-- `jwt-issuer` and `jwt-audience` — exact JWT validation values; and
-- `recovery-verifier-token` — token for the provider verification endpoint.
+- `jwt-issuer` and `jwt-audience` — exact JWT validation values;
+- `recovery-verifier-token` — token for the provider verification endpoint; and
+- `webhook-secret` — HMAC secret when `loom.webhook.url` is set.
+
+### Audit webhooks
+
+When `loom.webhook.url` is set:
+
+- the API enqueues to `loom_webhook_outbox` (`LOOM_WEBHOOK_DURABLE=true`);
+- `webhookWorker` runs `loom webhook-worker` as a separate Deployment;
+- `loom.webhook.runWorkerInAPI` stays `false` for multi-replica safety.
+
+```yaml
+loom:
+  webhook:
+    url: https://hooks.example.com/loom
+    allowHosts: hooks.example.com
+    durable: true
+    runWorkerInAPI: false
+webhookWorker:
+  enabled: true
+  replicas: 1
+```
 
 Create the Secret through the deployment's secret manager integration, not a
 checked-in Kubernetes manifest. The worker sends only execution ID, operation,

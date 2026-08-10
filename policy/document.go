@@ -23,25 +23,76 @@ type Document struct {
 	Hash string `json:"hash,omitempty"`
 }
 
-// ParseDocument unmarshals JSON. Fail-closed on empty version when requireVersion.
+// ParseDocument unmarshals JSON with the same strict rules as file policies.
+// Fail-closed on empty input, unknown fields, duplicate keys, and invalid rules.
+// Callers must not replace live policy when this returns an error.
+//
+// Extra top-level keys such as "tests" (used by `loom policy test` fixtures)
+// are accepted only when present as a raw array; they are ignored for rule
+// loading so test fixtures remain single-file without weakening rule checks.
 func ParseDocument(raw []byte) (*Document, error) {
+	return ParseDocumentWithLimits(raw, Limits{})
+}
+
+// ParseDocumentWithLimits is ParseDocument with explicit resource bounds.
+func ParseDocumentWithLimits(raw []byte, limits Limits) (*Document, error) {
+	limits = limits.withDefaults()
 	if len(raw) == 0 {
 		return nil, fmt.Errorf("%w: empty policy document", core.ErrInvalidArgument)
 	}
-	var d Document
-	if err := json.Unmarshal(raw, &d); err != nil {
+	if len(raw) > limits.MaxBytes {
+		return nil, fmt.Errorf("%w: policy document exceeds %d bytes", core.ErrInvalidArgument, limits.MaxBytes)
+	}
+	// Decode into a wire shape first so EffectAllow strings can be validated
+	// against the known enumeration before becoming core.Effect values.
+	// "tests" is permitted for CLI fixtures and discarded here.
+	var wire struct {
+		Version   int64           `json:"version"`
+		ID        string          `json:"id,omitempty"`
+		Rules     []FileRule      `json:"rules"`
+		UpdatedAt time.Time       `json:"updated_at,omitempty"`
+		Hash      string          `json:"hash,omitempty"`
+		Tests     json.RawMessage `json:"tests,omitempty"`
+	}
+	if err := strictDecode(raw, &wire); err != nil {
 		return nil, fmt.Errorf("policy: invalid json: %w", err)
 	}
-	if d.ID == "" {
-		d.ID = "default"
+	if wire.Rules == nil {
+		return nil, fmt.Errorf("%w: rules array is required", core.ErrInvalidArgument)
 	}
-	// Validate each rule without applying
-	for i, r := range d.Rules {
-		if _, err := normalizeRule(r); err != nil {
+	if len(wire.Rules) > limits.MaxRules {
+		return nil, fmt.Errorf("%w: rule count %d exceeds limit %d", core.ErrInvalidArgument, len(wire.Rules), limits.MaxRules)
+	}
+	id, err := boundString("id", wire.ID, limits.MaxStringLen)
+	if err != nil {
+		return nil, err
+	}
+	if id == "" {
+		id = "default"
+	}
+	hash, err := boundString("hash", wire.Hash, limits.MaxStringLen)
+	if err != nil {
+		return nil, err
+	}
+	rules := make([]Rule, 0, len(wire.Rules))
+	for i, fr := range wire.Rules {
+		rule, err := fileRuleToRule(fr, limits)
+		if err != nil {
 			return nil, fmt.Errorf("policy: rule[%d]: %w", i, err)
 		}
+		normalized, err := normalizeRule(rule)
+		if err != nil {
+			return nil, fmt.Errorf("policy: rule[%d]: %w", i, err)
+		}
+		rules = append(rules, normalized)
 	}
-	return &d, nil
+	return &Document{
+		Version:   wire.Version,
+		ID:        id,
+		Rules:     rules,
+		UpdatedAt: wire.UpdatedAt,
+		Hash:      hash,
+	}, nil
 }
 
 // Bytes marshals the document.

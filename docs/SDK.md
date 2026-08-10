@@ -15,20 +15,30 @@ in each registry; version alignment alone does not mean a package is available.
 Cross-language request/response semantics are versioned in
 [`../conformance/fixtures/execute-semantics.v1.json`](../conformance/fixtures/execute-semantics.v1.json).
 
-## Install released SDKs
+## Install SDKs
 
-Use these commands only after the release documentation confirms that the
-corresponding registry publication succeeded.
+**As of v1.0.0, only the Go module is available from a public registry.**
+Python (`loreste-loom`), npm (`@loreste/loom-sdk`), and crates.io (`loom-sdk`)
+publication is pending. See [`RELEASES.md`](RELEASES.md) and
+[`release-manifest.json`](../release-manifest.json). Do not install PyPI
+`loom-sdk` — that name belongs to an unrelated project.
+
+Go (published via git tags):
 
 ```sh
-python -m pip install loom-sdk
-npm install @loreste/loom-sdk
-cargo add loom-sdk
 go get github.com/loreste/loom@vX.Y.Z
 ```
 
-Replace `vX.Y.Z` with the reviewed release. Node applications use the
-TypeScript package directly through its package exports.
+Checkout installs for other languages (until public publication succeeds):
+
+```sh
+python -m pip install ./sdk/python
+# TypeScript: cd sdk/typescript && npm install && npm run build
+# Rust path dependency: loom-sdk = { path = "../loom/sdk/rust" }
+```
+
+After a future authorized registry release, install only the coordinates listed
+with `published: true` in `release-manifest.json`.
 
 ## Start a development server
 

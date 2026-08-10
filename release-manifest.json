@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "project": "github.com/loreste/loom",
+  "version_file": "VERSION",
+  "note": "Registry packages are listed as intended coordinates. published=true only after an unauthenticated public install of the exact version succeeds.",
+  "server": {
+    "go_module": "github.com/loreste/loom",
+    "binary_prefix": "loom",
+    "container": "ghcr.io/loreste/loom",
+    "artifacts": [
+      "platform binaries",
+      "SHA256SUMS",
+      "Sigstore bundles",
+      "CycloneDX SBOM",
+      "build provenance"
+    ]
+  },
+  "sdks": [
+    {
+      "language": "go",
+      "coordinate": "github.com/loreste/loom",
+      "install": "go get github.com/loreste/loom@vX.Y.Z",
+      "published": true,
+      "source": "immutable git tags via the Go module proxy"
+    },
+    {
+      "language": "python",
+      "distribution": "loreste-loom",
+      "import_package": "loom",
+      "coordinate": "pypi:loreste-loom",
+      "install": "python -m pip install loreste-loom",
+      "published": false,
+      "blocked_name": "loom-sdk",
+      "blocked_reason": "PyPI name loom-sdk is owned by an unrelated project; do not publish under it",
+      "checkout_install": "python -m pip install ./sdk/python"
+    },
+    {
+      "language": "typescript",
+      "coordinate": "npm:@loreste/loom-sdk",
+      "install": "npm install @loreste/loom-sdk",
+      "published": false,
+      "checkout_install": "cd sdk/typescript && npm install && npm run build"
+    },
+    {
+      "language": "rust",
+      "coordinate": "crates.io:loom-sdk",
+      "install": "cargo add loom-sdk",
+      "published": false,
+      "checkout_install": "loom-sdk = { path = \"../loom/sdk/rust\" }",
+      "ownership": "pending crates.io ownership confirmation"
+    }
+  ],
+  "cli_commands": {
+    "top_level": [
+      "exec",
+      "serve",
+      "mint-jwt",
+      "approve",
+      "recovery-worker",
+      "webhook-worker",
+      "recovery",
+      "execution",
+      "audit",
+      "policy",
+      "migrate",
+      "version"
+    ],
+    "recovery": ["list", "requeue", "dead-letter"],
+    "execution": ["get"],
+    "audit": [
+      "head",
+      "verify",
+      "export",
+      "checkpoint",
+      "verify-checkpoint",
+      "rotate"
+    ],
+    "policy": ["lint", "test", "diff", "explain", "simulate"]
+  }
+}

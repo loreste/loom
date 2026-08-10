@@ -55,6 +55,31 @@ type Config struct {
 	// TrustedTLSProxy means a deployment terminates TLS before Loom. It is
 	// required explicitly before production plaintext listeners are allowed.
 	TrustedTLSProxy bool
+
+	// WebhookURL, when set, attaches a nondurable signed audit webhook sink.
+	// Production requires HTTPS and LOOM_WEBHOOK_SECRET.
+	WebhookURL string
+	// WebhookSecret HMAC secret for signed envelopes.
+	WebhookSecret string
+	// WebhookKeyID optional signing key identifier for rotation.
+	WebhookKeyID string
+	// WebhookAllowHosts comma-separated exact host allowlist (recommended in production).
+	WebhookAllowHosts []string
+	// WebhookFailClosed propagates delivery errors into the audit pipeline.
+	// Prefer a durable outbox over FailClosed for post-side-effect delivery.
+	WebhookFailClosed bool
+	// WebhookAllowHTTP permits cleartext destinations (development only).
+	WebhookAllowHTTP bool
+	// WebhookAllowPrivate permits loopback/private destinations (development/tests only).
+	WebhookAllowPrivate bool
+	// WebhookTimeout bounds each delivery attempt.
+	WebhookTimeout time.Duration
+	// WebhookDurable enqueues to the durable outbox when PostgreSQL is
+	// configured. Default true when LOOM_DATABASE_URL is set.
+	WebhookDurable bool
+	// WebhookRunWorker starts an in-process delivery worker with the API.
+	// Prefer a separate loom webhook-worker process in multi-replica deploys.
+	WebhookRunWorker bool
 }
 
 // Load reads LOOM_* environment variables with safe defaults.
@@ -81,8 +106,36 @@ func Load() Config {
 		PolicyPath:            os.Getenv("LOOM_POLICY_PATH"),
 		PolicySyncInterval:    ParseDurationEnv("LOOM_POLICY_SYNC_INTERVAL", 5*time.Second),
 		TrustedTLSProxy:       envBool("LOOM_TRUSTED_TLS_PROXY", false),
+		WebhookURL:            strings.TrimSpace(os.Getenv("LOOM_WEBHOOK_URL")),
+		WebhookSecret:         os.Getenv("LOOM_WEBHOOK_SECRET"),
+		WebhookKeyID:          os.Getenv("LOOM_WEBHOOK_KEY_ID"),
+		WebhookAllowHosts:     splitCSV(os.Getenv("LOOM_WEBHOOK_ALLOW_HOSTS")),
+		WebhookFailClosed:     envBool("LOOM_WEBHOOK_FAIL_CLOSED", false),
+		WebhookAllowHTTP:      envBool("LOOM_WEBHOOK_ALLOW_HTTP", false),
+		WebhookAllowPrivate:   envBool("LOOM_WEBHOOK_ALLOW_PRIVATE", false),
+		WebhookTimeout:        ParseDurationEnv("LOOM_WEBHOOK_TIMEOUT", 5*time.Second),
+		// Durable defaults on when Postgres is configured so production does
+		// not silently fall back to inline nondurable delivery.
+		WebhookDurable:   envBool("LOOM_WEBHOOK_DURABLE", os.Getenv("LOOM_DATABASE_URL") != ""),
+		WebhookRunWorker: envBool("LOOM_WEBHOOK_RUN_WORKER", false),
 	}
 	return c
+}
+
+func splitCSV(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // IsProduction reports whether Env is a production-like profile.
@@ -114,6 +167,21 @@ func (c Config) Validate() error {
 	if strings.HasPrefix(c.JWTSecret, "dev-only") {
 		return fmt.Errorf("refusing dev JWT secret when explicitly set as LOOM_JWT_SECRET value starting with dev-only")
 	}
+	if c.WebhookURL != "" {
+		if c.WebhookSecret == "" && c.IsProduction() {
+			return fmt.Errorf("LOOM_WEBHOOK_URL requires LOOM_WEBHOOK_SECRET in production")
+		}
+		if c.IsProduction() {
+			if c.WebhookAllowHTTP {
+				return fmt.Errorf("LOOM_WEBHOOK_ALLOW_HTTP is not permitted when LOOM_ENV=%s", c.Env)
+			}
+			if c.WebhookAllowPrivate {
+				return fmt.Errorf("LOOM_WEBHOOK_ALLOW_PRIVATE is not permitted when LOOM_ENV=%s", c.Env)
+			}
+		}
+	} else if c.WebhookSecret != "" {
+		return fmt.Errorf("LOOM_WEBHOOK_SECRET set without LOOM_WEBHOOK_URL")
+	}
 	if c.IsProduction() {
 		if !c.DisableDemoPrincipals && !c.AllowDemo {
 			return fmt.Errorf("LOOM_ENV=%s requires LOOM_DISABLE_DEMO_PRINCIPALS=true (or LOOM_ALLOW_DEMO=true for explicit demo)", c.Env)
@@ -129,6 +197,11 @@ func (c Config) Validate() error {
 		}
 	}
 	return nil
+}
+
+// WebhookConfigured reports whether an audit webhook destination is set.
+func (c Config) WebhookConfigured() bool {
+	return strings.TrimSpace(c.WebhookURL) != ""
 }
 
 // Durable reports whether a non-memory store is configured.

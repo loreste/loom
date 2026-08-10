@@ -81,6 +81,7 @@ type Bundle struct {
 	ExecutionStatus *ExecutionStore
 	Audit           *AuditSink
 	Policy          *PolicySource
+	WebhookOutbox   *WebhookOutbox
 }
 
 // NewBundle opens, migrates, and returns stores.
@@ -105,6 +106,7 @@ func NewBundlePool(ctx context.Context, dsn string, pool PoolConfig) (*Bundle, e
 		ExecutionStatus: NewExecutionStore(db),
 		Audit:           NewAuditSink(db),
 		Policy:          NewPolicySource(db),
+		WebhookOutbox:   NewWebhookOutbox(db),
 	}, nil
 }
 

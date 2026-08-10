@@ -1,20 +1,24 @@
+{{- if and .Values.loom.webhook.url .Values.webhookWorker.enabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "loom.fullname" . }}
+  name: {{ include "loom.fullname" . }}-webhook
   labels:
     {{- include "loom.labels" . | nindent 4 }}
+    app.kubernetes.io/component: webhook-worker
 spec:
-  replicas: {{ .Values.api.replicas }}
+  replicas: {{ .Values.webhookWorker.replicas }}
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ include "loom.name" . }}
       app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: webhook-worker
   template:
     metadata:
       labels:
         app.kubernetes.io/name: {{ include "loom.name" . }}
         app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: webhook-worker
     spec:
       serviceAccountName: {{ include "loom.serviceAccountName" . }}
       automountServiceAccountToken: false
@@ -23,14 +27,10 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       containers:
-        - name: loom
+        - name: webhook-worker
           image: {{ include "loom.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          args: ["serve"]
-          ports:
-            - name: http
-              containerPort: 8080
-              protocol: TCP
+          args: ["webhook-worker"]
           env:
             - name: LOOM_ENV
               value: production
@@ -38,37 +38,30 @@ spec:
               value: "true"
             - name: LOOM_DISABLE_DEMO_PRINCIPALS
               value: "true"
-            - name: LOOM_TRUSTED_TLS_PROXY
-              value: {{ .Values.loom.trustedTLSProxy | quote }}
-            - name: LOOM_TENANT_CLAIM
-              value: {{ .Values.loom.tenantClaim | quote }}
-            - name: LOOM_POLICY_PATH
-              value: {{ .Values.loom.policyPath | quote }}
-            - name: LOOM_POLICY_SYNC_INTERVAL
-              value: {{ .Values.loom.policySyncInterval | quote }}
-            - name: LOOM_HTTP_RATE_LIMIT
-              value: {{ .Values.loom.httpRateLimitPerMinute | quote }}
-            {{- if .Values.loom.webhook.url }}
             - name: LOOM_WEBHOOK_URL
               value: {{ .Values.loom.webhook.url | quote }}
             - name: LOOM_WEBHOOK_KEY_ID
               value: {{ .Values.loom.webhook.keyId | quote }}
             - name: LOOM_WEBHOOK_ALLOW_HOSTS
               value: {{ .Values.loom.webhook.allowHosts | quote }}
-            - name: LOOM_WEBHOOK_FAIL_CLOSED
-              value: {{ .Values.loom.webhook.failClosed | quote }}
             - name: LOOM_WEBHOOK_TIMEOUT
               value: {{ .Values.loom.webhook.timeout | quote }}
             - name: LOOM_WEBHOOK_DURABLE
-              value: {{ .Values.loom.webhook.durable | quote }}
-            - name: LOOM_WEBHOOK_RUN_WORKER
-              value: {{ .Values.loom.webhook.runWorkerInAPI | quote }}
-            - name: LOOM_WEBHOOK_SECRET
+              value: "true"
+            - name: LOOM_WEBHOOK_OWNER
               valueFrom:
-                secretKeyRef:
-                  name: {{ include "loom.secretName" . }}
-                  key: {{ .Values.secrets.webhookSecretKey }}
-            {{- end }}
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: LOOM_WEBHOOK_POLL
+              value: {{ .Values.webhookWorker.poll | quote }}
+            - name: LOOM_WEBHOOK_LEASE
+              value: {{ .Values.webhookWorker.lease | quote }}
+            - name: LOOM_WEBHOOK_BACKOFF_BASE
+              value: {{ .Values.webhookWorker.backoffBase | quote }}
+            - name: LOOM_WEBHOOK_BACKOFF_MAX
+              value: {{ .Values.webhookWorker.backoffMax | quote }}
+            - name: LOOM_WEBHOOK_MAX_ATTEMPTS
+              value: {{ .Values.webhookWorker.maxAttempts | quote }}
             - name: LOOM_DATABASE_URL
               valueFrom:
                 secretKeyRef:
@@ -94,23 +87,16 @@ spec:
                 secretKeyRef:
                   name: {{ include "loom.secretName" . }}
                   key: {{ .Values.secrets.jwtAudienceKey }}
-          readinessProbe:
-            httpGet:
-              path: /readyz
-              port: http
-            periodSeconds: 10
-            timeoutSeconds: 3
-            failureThreshold: 6
-          livenessProbe:
-            httpGet:
-              path: /healthz
-              port: http
-            periodSeconds: 20
-            timeoutSeconds: 3
+            - name: LOOM_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "loom.secretName" . }}
+                  key: {{ .Values.secrets.webhookSecretKey }}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
           resources:
-            {{- toYaml .Values.api.resources | nindent 12 }}
+            {{- toYaml .Values.webhookWorker.resources | nindent 12 }}
+{{- end }}

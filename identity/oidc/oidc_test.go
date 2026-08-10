@@ -184,7 +184,8 @@ func TestVerifierRejectsTimeClaimsAndMalformedTokens(t *testing.T) {
 		name string
 		edit func(map[string]any)
 	}{
-		{name: "expired", edit: func(claims map[string]any) { claims["exp"] = clock.Add(-time.Second).Unix() }},
+		// Must expire beyond default ClockSkew (30s), not merely 1s in the past.
+		{name: "expired", edit: func(claims map[string]any) { claims["exp"] = clock.Add(-time.Minute).Unix() }},
 		{name: "not yet valid", edit: func(claims map[string]any) { claims["nbf"] = clock.Add(time.Minute).Unix() }},
 		{name: "issued in future", edit: func(claims map[string]any) { claims["iat"] = clock.Add(time.Minute).Unix() }},
 	}

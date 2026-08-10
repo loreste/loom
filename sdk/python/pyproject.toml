@@ -1,5 +1,7 @@
 [project]
-name = "loom-sdk"
+# Distribution name on PyPI. Import package remains `loom`.
+# Never publish as `loom-sdk` — that name is owned by an unrelated project.
+name = "loreste-loom"
 version = "1.0.0"
 description = "Loom Universal Runtime Python SDK (HTTP client)"
 readme = "README.md"
@@ -8,6 +10,9 @@ license = { text = "Apache-2.0" }
 
 [project.urls]
 Repository = "https://github.com/loreste/loom"
+Homepage = "https://github.com/loreste/loom"
+Documentation = "https://github.com/loreste/loom/blob/main/docs/SDK.md"
+"Bug Tracker" = "https://github.com/loreste/loom/issues"
 
 [project.optional-dependencies]
 dev = [

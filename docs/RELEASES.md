@@ -11,10 +11,25 @@ with a `v` prefix, for example `VERSION=X.Y.Z` and tag `vX.Y.Z`.
 - a signed multi-architecture image at `ghcr.io/<owner>/<repository>`; and
 - the GitHub release's package of checksums, signatures, SBOM, and provenance.
 
-For v1.0.0, the Go module, binaries, image, and release evidence are
-available. The Python, TypeScript, and Rust SDKs are published to PyPI, npm,
-and crates.io via trusted-publisher OIDC. The SDK publication workflow verifies
-version alignment before publishing.
+For v1.0.0, the Go module, binaries, image, checksums, signatures, SBOM, and
+provenance evidence are available from the GitHub release and GHCR. The
+machine-readable inventory is [`release-manifest.json`](../release-manifest.json).
+
+**Python, TypeScript/npm, and Rust SDKs are not published to public registries
+for v1.0.0.** The v1 tag's SDK publication workflow failed, and automatic
+tag-triggered SDK publishing is disabled until trusted-publisher configuration
+and conflict-free package identities are confirmed. Install those SDKs from a
+repository checkout until an unauthenticated public install of the exact
+version succeeds and this document is updated.
+
+Intended registry coordinates (not yet public):
+
+| Language   | Coordinate              | Status                                      |
+|------------|-------------------------|---------------------------------------------|
+| Go         | `github.com/loreste/loom` | Published via immutable git tags          |
+| Python     | PyPI `loreste-loom`     | Pending; never use conflicting `loom-sdk`   |
+| TypeScript | npm `@loreste/loom-sdk` | Pending scope ownership and first publish   |
+| Rust       | crates.io `loom-sdk`    | Pending ownership confirmation              |
 
 Go consumers use the immutable Git tag through the Go module proxy.
 
@@ -60,8 +75,11 @@ after a transient publication failure:
 
 A release must be cut from a clean, reviewed commit; exact-commit CI,
 security, dependency review, container scan, and SDK contract checks must pass
-before publication. SDK publication also verifies installation of the exact
-version from PyPI, npm, and crates.io after registry propagation.
+before publication. When SDK registry publication is re-enabled, the workflow
+must install each package unauthenticated from the public registry, verify the
+installed version and repository metadata, run conformance fixtures against the
+exact server release, and fail if any coordinate differs from
+`release-manifest.json`.
 
 ## Verify a release offline
 

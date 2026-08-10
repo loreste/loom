@@ -171,5 +171,30 @@ CREATE TABLE IF NOT EXISTS loom_policy (
 
 CREATE INDEX IF NOT EXISTS idx_loom_policy_version ON loom_policy (version DESC);
 
+-- Durable webhook delivery outbox. Write path only enqueues; workers deliver.
+-- event_id is unique so audit MultiSink retries never create duplicate units.
+CREATE TABLE IF NOT EXISTS loom_webhook_outbox (
+    id                    TEXT PRIMARY KEY,
+    event_id              TEXT NOT NULL,
+    audit_stream          TEXT NOT NULL DEFAULT '',
+    sequence_no           BIGINT NOT NULL DEFAULT 0,
+    payload               JSONB NOT NULL,
+    state                 TEXT NOT NULL DEFAULT 'pending',
+    attempt               INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at       TIMESTAMPTZ,
+    lease_id              TEXT,
+    lease_owner           TEXT,
+    lease_until           TIMESTAMPTZ,
+    last_failure_category TEXT NOT NULL DEFAULT '',
+    last_failure_summary  TEXT NOT NULL DEFAULT '',
+    created_at            TIMESTAMPTZ NOT NULL,
+    updated_at            TIMESTAMPTZ NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_loom_webhook_outbox_event
+    ON loom_webhook_outbox (event_id);
+CREATE INDEX IF NOT EXISTS idx_loom_webhook_outbox_claim
+    ON loom_webhook_outbox (state, next_attempt_at, lease_until, audit_stream, sequence_no, created_at);
+
 -- NOTE: schema version is recorded by store/postgres.Migrate after applying
 -- this file; never stamp loom_schema_meta here or the downgrade guard is dead.

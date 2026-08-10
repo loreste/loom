@@ -123,10 +123,14 @@ func NewVerifier(ctx context.Context, cfg Config) (*Verifier, error) {
 		health.discoveryFailures.Add(1)
 		return nil, fmt.Errorf("identity/oidc: discovery failed: %w", err)
 	}
+	// SkipExpiryCheck: go-oidc applies zero leeway to exp and a hard-coded
+	// 5-minute nbf leeway. Loom enforces exp/nbf/iat with Config.ClockSkew so
+	// deployments get a single, conservative, configurable skew budget.
 	verifier := provider.VerifierContext(providerCtx, &gooidc.Config{
 		ClientID:             cfg.Audience,
 		SupportedSigningAlgs: append([]string(nil), cfg.AllowedAlgorithms...),
 		Now:                  cfg.Now,
+		SkipExpiryCheck:      true,
 	})
 	// Fetch the key set now. go-oidc otherwise loads it lazily on the first
 	// token, which would leave Health().Ready false until real traffic
@@ -360,6 +364,11 @@ func (v *Verifier) validateTimes(token *gooidc.IDToken, claims map[string]any) e
 	if token.Expiry.IsZero() {
 		return fmt.Errorf("identity/oidc: exp claim missing")
 	}
+	// Reject when now is past exp + skew. A token that expired within the
+	// configured clock-skew window remains valid; anything older is denied.
+	if now.After(token.Expiry.Add(v.cfg.ClockSkew)) {
+		return fmt.Errorf("identity/oidc: token expired")
+	}
 	issuedAt, ok := numericDate(claims["iat"])
 	if !ok {
 		return fmt.Errorf("identity/oidc: iat claim missing")
@@ -371,6 +380,8 @@ func (v *Verifier) validateTimes(token *gooidc.IDToken, claims map[string]any) e
 		return fmt.Errorf("identity/oidc: token is too old")
 	}
 	if raw, exists := claims["nbf"]; exists {
+		// Stricter than go-oidc's fixed 5-minute nbf leeway: only the
+		// configured ClockSkew is accepted.
 		if notBefore, valid := numericDate(raw); !valid || notBefore.After(now.Add(v.cfg.ClockSkew)) {
 			return fmt.Errorf("identity/oidc: token is not yet valid")
 		}
