@@ -174,19 +174,31 @@ export LOOM_JWT_SECRET='<value supplied by your secret manager>'
 export LOOM_JWT_KEY_ID='active-key'
 export LOOM_JWT_ISSUER='https://issuer.example'
 export LOOM_JWT_AUDIENCE='loom-api'
+
+# Optional: production OIDC/JWKS (first-class CLI/bootstrap wiring)
+export LOOM_OIDC_ISSUER='https://issuer.example/realms/loom'
+export LOOM_OIDC_AUDIENCE='loom-api'
+export LOOM_OIDC_ALGS='RS256'
+
+# Optional: durable signed audit webhooks (requires Postgres)
+export LOOM_WEBHOOK_URL='https://hooks.example.com/loom'
+export LOOM_WEBHOOK_SECRET='<hmac-secret>'
+export LOOM_WEBHOOK_ALLOW_HOSTS='hooks.example.com'
+export LOOM_WEBHOOK_DURABLE=true
+# Separate process recommended:
+# loom webhook-worker
 ```
 
-The built-in verifier supports configured HMAC JWT verification. Applications
-that need OIDC discovery and JWKS rotation should embed `identity/oidc` and
-configure issuer, audience, algorithm allowlist, response limits, claim
-mapping, and revocation behavior explicitly. Provider lifecycle and enterprise
-identity administration remain application responsibilities; see
-[`IDENTITY.md`](IDENTITY.md).
+The CLI supports HMAC JWT (`LOOM_JWT_*`) and OIDC/JWKS (`LOOM_OIDC_*`). OIDC is
+also embeddable via `identity/oidc` for custom applications. Provider lifecycle
+and enterprise identity administration remain application responsibilities; see
+[`IDENTITY.md`](IDENTITY.md) and [`CONFIGURATION.md`](CONFIGURATION.md).
 
 For a single node, `LOOM_DATA_DIR` provides file-backed approvals, idempotency,
 execution status, and audit state. For multiple replicas, set
-`LOOM_DATABASE_URL`; the PostgreSQL bundle includes a shared execution-status
-and recovery store. Redis is required when quota state must be shared.
+`LOOM_DATABASE_URL`; the PostgreSQL bundle includes shared execution-status,
+recovery, audit, and webhook outbox tables. Redis is required when quota state
+must be shared.
 
 If a verified JWT carries a tenant claim, set `LOOM_TENANT_CLAIM` and configure
 tenant-aware database access as described in [`TENANCY.md`](TENANCY.md).

@@ -37,9 +37,9 @@ each task.
 | Failure-injection scenarios and results | [`FAILURE-INJECTION.md`](FAILURE-INJECTION.md) |
 | Local checks and release artifacts | [`BUILD.md`](BUILD.md) |
 | Package, image, and artifact publication | [`RELEASES.md`](RELEASES.md) |
-| Kubernetes and Helm deployment | [`KUBERNETES.md`](KUBERNETES.md) |
+| Kubernetes and Helm deployment (API, recovery, webhook workers) | [`KUBERNETES.md`](KUBERNETES.md) |
 | Release history | [`../CHANGELOG.md`](../CHANGELOG.md) |
-| v1 implementation evidence | [`V1-IMPLEMENTATION-REPORT.md`](V1-IMPLEMENTATION-REPORT.md) |
+| v1 implementation evidence (v1.0.1) | [`V1-IMPLEMENTATION-REPORT.md`](V1-IMPLEMENTATION-REPORT.md) |
 
 ## Examples and source
 

@@ -48,12 +48,15 @@ required audit sink is unavailable.
 Treat readiness failures as deployment events. Do not route production traffic
 to an instance whose durable security dependencies are not ready.
 
-`/readyz` probes PostgreSQL and Redis automatically. It cannot probe a
-dependency the application constructed itself, including an identity verifier.
-Register those through `bootstrap.Config.ReadyChecks`; an OIDC deployment
-should pass `verifier.ReadyCheck()`, which fails until issuer discovery and the
-JWKS fetch have both succeeded. Without it, a process that never reached its
-identity provider reports ready and then denies every authenticated request.
+`/readyz` probes PostgreSQL and Redis automatically. When `LOOM_OIDC_ISSUER` is
+set on the CLI (or OIDC is configured via `bootstrap.Config.OIDC`), bootstrap
+registers `oidc.Verifier.ReadyCheck()` so readiness fails until issuer
+discovery and the JWKS fetch have both succeeded.
+
+Embedded applications that construct their own verifier must still register
+`verifier.ReadyCheck()` through `bootstrap.Config.ReadyChecks` (or an
+equivalent). Without it, a process that never reached its identity provider
+can report ready and then deny every authenticated request.
 
 ## Side-effect failure handling
 

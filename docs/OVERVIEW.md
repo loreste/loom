@@ -75,9 +75,11 @@ explicit identity configuration, secret management, restricted database roles,
 PostgreSQL RLS where appropriate, tenant-bound transactions, durable storage,
 and operational monitoring.
 
-The current release includes HMAC, mTLS, and an embeddable OIDC/JWKS verifier.
-Issuer and audience configuration, certificate lifecycle, revocation, and
-provider-specific claim mapping remain application integration responsibilities.
+The current release includes HMAC JWT, mTLS, and OIDC/JWKS verification. The
+CLI/bootstrap path enables OIDC via `LOOM_OIDC_*` environment variables; the
+package is also embeddable for custom applications. Issuer and audience
+configuration, certificate lifecycle, revocation, and provider-specific claim
+mapping remain deployment responsibilities.
 
 ## From internal use to open source
 
