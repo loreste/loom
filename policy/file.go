@@ -54,8 +54,9 @@ func ParseJSONWithLimits(data []byte, limits Limits) ([]Rule, error) {
 	if err := strictDecode(data, &pf); err != nil {
 		return nil, fmt.Errorf("policy: parse: %w", err)
 	}
+	// Nil rules means deny-all (same as an empty array). Prefer "rules":[].
 	if pf.Rules == nil {
-		return nil, fmt.Errorf("%w: rules array is required", core.ErrInvalidArgument)
+		pf.Rules = []FileRule{}
 	}
 	if len(pf.Rules) > limits.MaxRules {
 		return nil, fmt.Errorf("%w: rule count %d exceeds limit %d", core.ErrInvalidArgument, len(pf.Rules), limits.MaxRules)

@@ -57,8 +57,10 @@ func ParseDocumentWithLimits(raw []byte, limits Limits) (*Document, error) {
 	if err := strictDecode(raw, &wire); err != nil {
 		return nil, fmt.Errorf("policy: invalid json: %w", err)
 	}
+	// Missing or null "rules" is treated as an empty deny-all set. An explicit
+	// empty array is the preferred form; either is valid policy (default DENY).
 	if wire.Rules == nil {
-		return nil, fmt.Errorf("%w: rules array is required", core.ErrInvalidArgument)
+		wire.Rules = []FileRule{}
 	}
 	if len(wire.Rules) > limits.MaxRules {
 		return nil, fmt.Errorf("%w: rule count %d exceeds limit %d", core.ErrInvalidArgument, len(wire.Rules), limits.MaxRules)
