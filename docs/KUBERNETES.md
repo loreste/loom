@@ -51,10 +51,77 @@ checked-in Kubernetes manifest. The worker sends only execution ID, operation,
 and operation version to the verifier. It never sends Loom input, output,
 credentials, or approval tokens.
 
+### NetworkPolicy (default-deny egress)
+
+With `networkPolicy.enabled=true` (default), egress is **not** open:
+
+- DNS to CoreDNS (`kube-system` / `k8s-app=kube-dns`) is allowed when
+  `networkPolicy.egress.dns.enabled=true`.
+- All other egress must be listed under `networkPolicy.egress.shared`,
+  `.api`, `.recovery`, and/or `.webhook` (CIDRs or namespace/pod selectors).
+- Set `networkPolicy.egress.allowAll=true` only as temporary break-glass.
+
+NetworkPolicy cannot select destinations by DNS hostname. For managed Postgres,
+Redis, OIDC, recovery verifiers, and webhook endpoints, supply IP blocks or
+in-cluster Service selectors. Example:
+
+```yaml
+networkPolicy:
+  egress:
+    allowAll: false
+    shared:
+      - to:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes: data
+            podSelector:
+              matchLabels:
+                app: postgres
+        ports:
+          - protocol: TCP
+            port: 5432
+      - to:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes: data
+            podSelector:
+              matchLabels:
+                app: redis
+        ports:
+          - protocol: TCP
+            port: 6379
+    recovery:
+      - to:
+          - ipBlock:
+              cidr: 203.0.113.10/32
+        ports:
+          - protocol: TCP
+            port: 443
+    webhook:
+      - to:
+          - ipBlock:
+              cidr: 203.0.113.20/32
+        ports:
+          - protocol: TCP
+            port: 443
+    api:
+      - to:
+          - ipBlock:
+              cidr: 203.0.113.30/32   # OIDC issuer, if not in-cluster
+        ports:
+          - protocol: TCP
+            port: 443
+```
+
+Separate policies are rendered for API (ingress + egress), recovery worker
+(egress only), and webhook worker (egress only when enabled).
+
 ## Install
 
 ```sh
-helm lint deploy/helm/loom
+helm lint deploy/helm/loom \
+  --set secrets.existingSecret=loom-runtime \
+  --set recoveryWorker.verifierURL=https://provider.example/recovery/verify
 helm upgrade --install loom deploy/helm/loom \
   --namespace loom --create-namespace \
   --set secrets.existingSecret=loom-runtime \

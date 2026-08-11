@@ -34,6 +34,10 @@ RLS. Keep break-glass access separate, approved, and audited.
 
 ## Identity and cryptographic keys
 
+Kubernetes NetworkPolicy defaults to deny-all egress except DNS plus
+operator-supplied peers for Postgres, Redis, recovery verifiers, webhooks, and
+OIDC. See [`KUBERNETES.md`](KUBERNETES.md).
+
 Audit webhooks, when enabled via `LOOM_WEBHOOK_URL`, attach through bootstrap.
 With PostgreSQL and `LOOM_WEBHOOK_DURABLE=true` (default when a database URL is
 set), the audit insert and `loom_webhook_outbox` enqueue commit in one

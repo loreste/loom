@@ -6,6 +6,12 @@ All notable changes to Loom are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- Helm NetworkPolicy defaults to deny-all egress (plus CoreDNS). Operators must
+  list Postgres, Redis, recovery verifier, webhook, and OIDC peers explicitly;
+  `networkPolicy.egress.allowAll` is break-glass only.
+
 ## [1.0.1] — 2026-08-10
 
 ### Security

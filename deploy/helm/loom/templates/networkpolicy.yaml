@@ -1,4 +1,5 @@
 {{- if .Values.networkPolicy.enabled }}
+{{- if .Values.networkPolicy.egress.allowAll }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -18,7 +19,77 @@ spec:
               {{- toYaml .Values.networkPolicy.allowedIngressNamespaceSelector | nindent 14 }}
       ports:
         - protocol: TCP
-          port: 8080
+          port: {{ .Values.api.service.port }}
   egress:
     - {}
+{{- else }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "loom.fullname" . }}-api
+  labels:
+    {{- include "loom.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "loom.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: api
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.allowedIngressNamespaceSelector | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.api.service.port }}
+  egress:
+{{- include "loom.egressDNS" . }}
+{{- include "loom.egressRules" .Values.networkPolicy.egress.shared }}
+{{- include "loom.egressRules" .Values.networkPolicy.egress.api }}
+{{- if .Values.recoveryWorker.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "loom.fullname" . }}-recovery
+  labels:
+    {{- include "loom.labels" . | nindent 4 }}
+    app.kubernetes.io/component: recovery-worker
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "loom.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: recovery-worker
+  policyTypes: [Egress]
+  egress:
+{{- include "loom.egressDNS" . }}
+{{- include "loom.egressRules" .Values.networkPolicy.egress.shared }}
+{{- include "loom.egressRules" .Values.networkPolicy.egress.recovery }}
+{{- end }}
+{{- if and .Values.loom.webhook.url .Values.webhookWorker.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "loom.fullname" . }}-webhook
+  labels:
+    {{- include "loom.labels" . | nindent 4 }}
+    app.kubernetes.io/component: webhook-worker
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "loom.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: webhook-worker
+  policyTypes: [Egress]
+  egress:
+{{- include "loom.egressDNS" . }}
+{{- include "loom.egressRules" .Values.networkPolicy.egress.shared }}
+{{- include "loom.egressRules" .Values.networkPolicy.egress.webhook }}
+{{- end }}
+{{- end }}
 {{- end }}

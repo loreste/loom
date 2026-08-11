@@ -4,17 +4,20 @@ metadata:
   name: {{ include "loom.fullname" . }}
   labels:
     {{- include "loom.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
 spec:
   replicas: {{ .Values.api.replicas }}
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ include "loom.name" . }}
       app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: api
   template:
     metadata:
       labels:
         app.kubernetes.io/name: {{ include "loom.name" . }}
         app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: api
     spec:
       serviceAccountName: {{ include "loom.serviceAccountName" . }}
       automountServiceAccountToken: false

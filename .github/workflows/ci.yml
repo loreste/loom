@@ -241,6 +241,9 @@ jobs:
             --set recoveryWorker.verifierURL=https://provider.example/recovery/verify \
             --set loom.webhook.url=https://hooks.example.com/loom \
             --set loom.webhook.allowHosts=hooks.example.com \
+            --set-json 'networkPolicy.egress.shared=[{"to":[{"ipBlock":{"cidr":"10.0.0.0/8"}}],"ports":[{"protocol":"TCP","port":5432}]}]' \
+            --set-json 'networkPolicy.egress.recovery=[{"to":[{"ipBlock":{"cidr":"203.0.113.10/32"}}],"ports":[{"protocol":"TCP","port":443}]}]' \
+            --set-json 'networkPolicy.egress.webhook=[{"to":[{"ipBlock":{"cidr":"203.0.113.20/32"}}],"ports":[{"protocol":"TCP","port":443}]}]' \
             > /tmp/loom-helm.yaml
           grep -q 'app.kubernetes.io/component: webhook-worker' /tmp/loom-helm.yaml
           grep -q 'args: \["webhook-worker"\]' /tmp/loom-helm.yaml
@@ -248,3 +251,22 @@ jobs:
           grep -q 'app.kubernetes.io/component: recovery-worker' /tmp/loom-helm.yaml
           # API must not run an in-process webhook worker by default.
           ! grep -A2 'name: LOOM_WEBHOOK_RUN_WORKER' /tmp/loom-helm.yaml | grep -q 'value: "true"'
+          # Component NetworkPolicies and DNS defaults.
+          grep -q 'name: loom-loom-api' /tmp/loom-helm.yaml
+          grep -q 'name: loom-loom-recovery' /tmp/loom-helm.yaml
+          grep -q 'name: loom-loom-webhook' /tmp/loom-helm.yaml
+          grep -q 'k8s-app: kube-dns' /tmp/loom-helm.yaml
+          grep -q 'app.kubernetes.io/component: api' /tmp/loom-helm.yaml
+          # Secure path must not emit unrestricted egress on the API policy.
+          python3 - <<'PY'
+from pathlib import Path
+text = Path("/tmp/loom-helm.yaml").read_text()
+assert "- {}" not in text.split("name: loom-loom-api", 1)[1].split("---", 1)[0], "api policy has open egress"
+print("networkpolicy default-deny checks passed")
+PY
+          # Break-glass allowAll still works.
+          helm template loom deploy/helm/loom \
+            --set secrets.existingSecret=loom-runtime \
+            --set recoveryWorker.verifierURL=https://provider.example/recovery/verify \
+            --set networkPolicy.egress.allowAll=true \
+            | grep -A5 'egress:' | grep -q '{}'

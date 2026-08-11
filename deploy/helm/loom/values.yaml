@@ -67,7 +67,63 @@ serviceAccount:
 
 networkPolicy:
   enabled: true
+  # Empty matchLabels means "from any namespace" for API ingress (typical
+  # behind an ingress controller). Tighten to the ingress namespace in production.
   allowedIngressNamespaceSelector: {}
+  egress:
+    # Secure default: deny all egress except DNS + explicit peers below.
+    # Set allowAll: true only as temporary break-glass (not for production).
+    allowAll: false
+    dns:
+      enabled: true
+      # null => defaults: namespace kubernetes.io/metadata.name=kube-system,
+      # pod k8s-app=kube-dns. Override both for non-standard clusters.
+      namespaceSelector: null
+      podSelector: null
+    # Applied to API, recovery, and webhook workers (Postgres + Redis).
+    shared: []
+    # API-only peers (e.g. OIDC issuer CIDR or service).
+    api: []
+    # Recovery worker peers (provider verifier endpoint).
+    recovery: []
+    # Webhook worker peers (webhook destination CIDR or service).
+    webhook: []
+    # Example (copy into shared / api / recovery / webhook as needed):
+    # shared:
+    #   - to:
+    #       - namespaceSelector:
+    #           matchLabels:
+    #             kubernetes: data
+    #         podSelector:
+    #           matchLabels:
+    #             app: postgres
+    #     ports:
+    #       - protocol: TCP
+    #         port: 5432
+    #   - to:
+    #       - namespaceSelector:
+    #           matchLabels:
+    #             kubernetes: data
+    #         podSelector:
+    #           matchLabels:
+    #             app: redis
+    #     ports:
+    #       - protocol: TCP
+    #         port: 6379
+    # recovery:
+    #   - to:
+    #       - ipBlock:
+    #           cidr: 203.0.113.10/32
+    #     ports:
+    #       - protocol: TCP
+    #         port: 443
+    # webhook:
+    #   - to:
+    #       - ipBlock:
+    #           cidr: 203.0.113.20/32
+    #     ports:
+    #       - protocol: TCP
+    #         port: 443
 
 podDisruptionBudget:
   enabled: true
