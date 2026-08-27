@@ -13,7 +13,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.45.0
 	google.golang.org/grpc v1.83.0
 	google.golang.org/protobuf v1.36.11
-	modernc.org/sqlite v1.56.0
+	modernc.org/sqlite v1.57.0
 )
 
 require (
