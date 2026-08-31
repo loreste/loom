@@ -258,12 +258,12 @@ jobs:
           grep -q 'k8s-app: kube-dns' /tmp/loom-helm.yaml
           grep -q 'app.kubernetes.io/component: api' /tmp/loom-helm.yaml
           # Secure path must not emit unrestricted egress on the API policy.
-          python3 - <<'PY'
-from pathlib import Path
-text = Path("/tmp/loom-helm.yaml").read_text()
-assert "- {}" not in text.split("name: loom-loom-api", 1)[1].split("---", 1)[0], "api policy has open egress"
-print("networkpolicy default-deny checks passed")
-PY
+          python3 -c "
+          from pathlib import Path
+          text = Path('/tmp/loom-helm.yaml').read_text()
+          assert '- {}' not in text.split('name: loom-loom-api', 1)[1].split('---', 1)[0], 'api policy has open egress'
+          print('networkpolicy default-deny checks passed')
+          "
           # Break-glass allowAll still works.
           helm template loom deploy/helm/loom \
             --set secrets.existingSecret=loom-runtime \
