@@ -1,6 +1,6 @@
 # Build arguments are overrideable by the release pipeline; no credentials or
 # runtime configuration are baked into the image.
-ARG GO_VERSION=1.26.5
+ARG GO_VERSION=1.27.0
 FROM golang:${GO_VERSION} AS build
 
 WORKDIR /src
