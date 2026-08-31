@@ -42,13 +42,13 @@ func (a *Adapter) runExecutionGet(ctx context.Context, args []string) int {
 		return 2
 	}
 	endpoint := base + "/v1/executions/" + url.PathEscape(args[0])
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil) // #nosec G704 -- base is operator-supplied CLI config
 	if err != nil {
 		fmt.Fprintln(a.errW(), "execution status:", err)
 		return 2
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
-	res, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	res, err := (&http.Client{Timeout: 15 * time.Second}).Do(req) // #nosec G704 -- base is operator-supplied CLI config
 	if err != nil {
 		fmt.Fprintln(a.errW(), "execution status request failed")
 		return 1

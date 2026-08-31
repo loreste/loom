@@ -569,7 +569,7 @@ func parseHostIP(h string) (netip.Addr, bool) {
 		// #nosec G115 -- the range check above bounds the conversion.
 		addr |= uint32(last)
 	}
-	return netip.AddrFrom4([4]byte{byte(addr >> 24), byte(addr >> 16), byte(addr >> 8), byte(addr)}), true
+	return netip.AddrFrom4([4]byte{byte(addr >> 24), byte(addr >> 16), byte(addr >> 8), byte(addr)}), true // #nosec G115 -- range-checked above
 }
 
 // --- Filesystem sandbox ---

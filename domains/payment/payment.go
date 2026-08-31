@@ -86,7 +86,7 @@ func handleCapture(ec *core.ExecutionContext) (*core.Result, error) {
 			"currency":    currency,
 			"merchant_id": merchant,
 			// must be stripped if present
-			"raw_processor_payload": map[string]any{"secret": "sk-should-not-leak-xxxxxxxxxxx"},
+			"raw_processor_payload": map[string]any{"secret": "sk-should-not-leak-xxxxxxxxxxx"}, // #nosec G101 -- test fixture, not real credentials
 		},
 		EffectsActual: []core.Effect{core.EffectMoney, core.EffectWrite},
 	}, nil

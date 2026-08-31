@@ -86,14 +86,14 @@ func (a *Adapter) runRecoveryAdmin(ctx context.Context, command string, args []s
 		fmt.Fprintln(a.errW(), "recovery operation: request encoding failed")
 		return 1
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/v1/execute", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/v1/execute", bytes.NewReader(body)) // #nosec G704 -- base is operator-supplied CLI config
 	if err != nil {
 		fmt.Fprintln(a.errW(), "recovery operation: request failed")
 		return 1
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
-	res, err := a.operatorHTTPClient().Do(req)
+	res, err := a.operatorHTTPClient().Do(req) // #nosec G704 -- base is operator-supplied CLI config
 	if err != nil {
 		fmt.Fprintln(a.errW(), "recovery operation request failed")
 		return 1
