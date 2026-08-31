@@ -39,7 +39,7 @@ in kube-system; override via networkPolicy.egress.dns.* when needed.
 {{- $dnsNS := .Values.networkPolicy.egress.dns.namespaceSelector -}}
 {{- $dnsPod := .Values.networkPolicy.egress.dns.podSelector -}}
 {{- if not $dnsNS }}{{ $dnsNS = dict "kubernetes.io/metadata.name" "kube-system" }}{{ end -}}
-{{- if not $dnsPod }}{{ $dnsPod = dict "k8s-app" "kube-dns" }}{{ end -}}
+{{- if not $dnsPod }}{{ $dnsPod = dict "k8s-app" "kube-dns" }}{{ end }}
     - to:
         - namespaceSelector:
             matchLabels:

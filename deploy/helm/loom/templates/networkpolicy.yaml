@@ -46,7 +46,7 @@ spec:
         - protocol: TCP
           port: {{ .Values.api.service.port }}
   egress:
-{{- include "loom.egressDNS" . }}
+{{ include "loom.egressDNS" . }}
 {{- include "loom.egressRules" .Values.networkPolicy.egress.shared }}
 {{- include "loom.egressRules" .Values.networkPolicy.egress.api }}
 {{- if .Values.recoveryWorker.enabled }}
@@ -66,7 +66,7 @@ spec:
       app.kubernetes.io/component: recovery-worker
   policyTypes: [Egress]
   egress:
-{{- include "loom.egressDNS" . }}
+{{ include "loom.egressDNS" . }}
 {{- include "loom.egressRules" .Values.networkPolicy.egress.shared }}
 {{- include "loom.egressRules" .Values.networkPolicy.egress.recovery }}
 {{- end }}
@@ -87,7 +87,7 @@ spec:
       app.kubernetes.io/component: webhook-worker
   policyTypes: [Egress]
   egress:
-{{- include "loom.egressDNS" . }}
+{{ include "loom.egressDNS" . }}
 {{- include "loom.egressRules" .Values.networkPolicy.egress.shared }}
 {{- include "loom.egressRules" .Values.networkPolicy.egress.webhook }}
 {{- end }}
