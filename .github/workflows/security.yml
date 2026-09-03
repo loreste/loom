@@ -26,7 +26,7 @@ jobs:
           set -o pipefail
           go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./... 2>&1 | tee /tmp/govulncheck.log
       - if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: govulncheck-log
           path: /tmp/govulncheck.log

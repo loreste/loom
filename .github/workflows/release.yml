@@ -95,7 +95,7 @@ jobs:
           LOOM_COMMIT: ${{ needs.release-gate.outputs.target_sha }}
           LOOM_BUILD_DATE: ${{ github.event.head_commit.timestamp }}
         run: ./scripts/build-release.sh
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: loom-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/loom-*
@@ -114,7 +114,7 @@ jobs:
           format: cyclonedx-json
           output-file: dist/loom-${{ env.RELEASE_REF }}-sbom.cdx.json
           upload-artifact: false
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: loom-release-sbom
           path: dist/loom-${{ env.RELEASE_REF }}-sbom.cdx.json
@@ -134,7 +134,7 @@ jobs:
           merge-multiple: true
       - name: Generate SHA-256 checksums
         run: sh ./scripts/generate-checksums.sh dist
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: loom-release-checksums
           path: dist/SHA256SUMS
@@ -159,7 +159,7 @@ jobs:
             [ -f "$asset" ] || continue
             cosign sign-blob --yes --bundle "$asset.sigstore.json" "$asset"
           done
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: loom-release-signatures
           path: dist/*.sigstore.json
